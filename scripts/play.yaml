@@ -4,12 +4,21 @@ hydra:
   # see https://hydra.cc/docs/advanced/search_path/
    - file://../cfg
 
-headless: true
+# Instructions:
+# Setting either "headless=false" or "offscreen_render=true" would make Isaac Sim
+# load rendering-related extensions upon startup, which consumes about 1-2G GPU
+# memory. The difference is, "headless=false" will opens up a GUI and is suited
+# for local debugging, and "offscreen_render=true" is suited for recording
+# videos during training.
+headless: false
+offscreen_render: false
 
 sim: ${task.sim}
-env: ${task.env}
+num_envs: 4
 
-total_frames: -1
+# Instructions:
+# Training terminates when either `total_frames` or `max_iters` is reached when
+# the value is positive.
 seed: 0
 
 viewer:

@@ -32,7 +32,6 @@ from torchrl.data import (
 )
 
 import omni.isaac.core.objects as objects
-from omni.isaac.debug_draw import _debug_draw
 
 import omni_drones.utils.kit as kit_utils
 from omni_drones.utils.torch import euler_to_quaternion
@@ -153,7 +152,6 @@ class PayloadFlyThrough(IsaacEnv):
         self.payload_target_pos = torch.zeros(self.num_envs, 3, device=self.device)
         self.alpha = 0.8
 
-        self.draw = _debug_draw.acquire_debug_draw_interface()
         self.payload_traj_vis = []
         self.drone_traj_vis = []
 

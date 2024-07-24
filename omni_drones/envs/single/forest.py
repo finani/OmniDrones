@@ -99,6 +99,22 @@ class Forest(IsaacEnv):
 
         super().__init__(cfg, headless)
 
+        self.lidar_vfov = (
+            max(-89., cfg.task.lidar_vfov[0]),
+            min(89., cfg.task.lidar_vfov[1])
+        )
+        self.lidar_range = cfg.task.lidar_range
+        ray_caster_cfg = RayCasterCfg(
+            prim_path="/World/envs/env_.*/Hummingbird_0/base_link",
+            offset=RayCasterCfg.OffsetCfg(pos=(0.0, 0.0, 0.0)),
+            attach_yaw_only=False,
+            pattern_cfg=patterns.BpearlPatternCfg(
+                vertical_ray_angles=torch.linspace(*self.lidar_vfov, 4)
+            ),
+            debug_vis=False,
+            mesh_prim_paths=["/World/ground"],
+        )
+        self.lidar: RayCaster = ray_caster_cfg.class_type(ray_caster_cfg)
         self.lidar._initialize_impl()
         self.lidar_resolution = (36, 4)
 

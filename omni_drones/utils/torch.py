@@ -182,6 +182,28 @@ def make_cells(
         cells = (cells.narrow(dim, 0, cells.size(dim)-1) + cells.narrow(dim, 1, cells.size(dim)-1)) / 2
     return cells
 
+import functools
+
+
+def manual_batch(func, broadcast=True):
+    @functools.wraps(func)
+    def wrapped(*args, **kwargs):
+        batch_shapes = [arg.shape[:-1] for arg in args]
+        if broadcast:
+            batch_shape = torch.broadcast_shapes(*batch_shapes)
+        else:
+            batch_shape = set(batch_shapes)
+            if len(batch_shape) != 1:
+                raise ValueError()
+            batch_shape = batch_shape.pop()
+        args = [
+            arg.expand(*batch_shape, arg.shape[-1]).reshape(-1, arg.shape[-1])
+            for arg in args
+        ]
+        ret = func(*args, **kwargs)
+        return ret.reshape(*batch_shape, *ret.shape[1:])
+    return wrapped
+
 
 @manual_batch
 def quat_rotate(q: torch.Tensor, v: torch.Tensor):

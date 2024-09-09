@@ -98,7 +98,6 @@ class Forest(IsaacEnv):
         self.has_payload = "payload" in self.randomization.keys()
 
         super().__init__(cfg, headless)
-
         self.lidar._initialize_impl()
         self.lidar_resolution = (36, 4)
 

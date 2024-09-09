@@ -33,7 +33,7 @@ from omni_drones.views import RigidPrimView
 from omni_drones.utils.torch import euler_to_quaternion
 
 from tensordict.tensordict import TensorDict, TensorDictBase
-from torchrl.data import UnboundedContinuousTensorSpec, CompositeSpec, DiscreteTensorSpec
+from torchrl.data import UnboundedContinuousTensorSpec, CompositeSpec
 from omni.isaac.debug_draw import _debug_draw
 
 from .utils import attach_payload

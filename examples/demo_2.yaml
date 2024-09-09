@@ -1,5 +1,14 @@
+headless: false
+num_envs: 4
+
+viewer:
+  resolution: [960, 720]
+  eye: [8, 0., 6.]
+  lookat: [0., 0., 1.]
+
 sim:
   _target_: omni.isaac.orbit.sim.SimulationCfg
+
   physics_prim_path: /physicsScene
   dt: 0.016
   substeps: 1
@@ -8,7 +17,6 @@ sim:
   disable_contact_processing: true
   use_gpu_pipeline: true
   device: cuda:0
-
   physx:
     _target_: omni.isaac.orbit.sim.PhysxCfg
     use_gpu: true
@@ -23,7 +31,6 @@ sim:
     bounce_threshold_velocity: 0.5
     friction_offset_threshold: 0.04
     friction_correlation_distance: 0.025
-
     gpu_max_rigid_contact_count: 2097152
     gpu_max_rigid_patch_count: 2097152
     gpu_found_lost_pairs_capacity: 1048576
@@ -35,3 +42,24 @@ sim:
     gpu_max_num_partitions: 8
     gpu_max_soft_body_contacts: 1048576
     gpu_max_particle_contacts: 1048576
+
+task:
+  _target_: omni_drones.envs.isaac_env.TaskCfg
+  max_episode_length: 500
+  
+  observations:
+    - key: [agents, observation]
+      items:
+        DynamicState: {asset_name: drone}
+  
+  actions:
+    - key: [agents, action]
+      items:
+        LeePositionController: 
+          asset_name: drone
+          pos_gain: [4, 4, 4]
+          vel_gain: [2.2, 2.2, 2.2]
+          attitute_gain: [0.7, 0.7, 0.035]
+          ang_rate_gain: [0.1, 0.1, 0.025]
+          inertia: [0.007, 0.007, 0.012]
+        

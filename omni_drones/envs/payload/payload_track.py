@@ -21,23 +21,16 @@
 # SOFTWARE.
 
 
-import omni_drones.utils.kit as kit_utils
-from omni_drones.utils.torch import euler_to_quaternion, quat_rotate
-import omni.isaac.core.utils.prims as prim_utils
 import torch
 import torch.distributions as D
-from torch.func import vmap
 
-from omni_drones.envs.isaac_env import AgentSpec, IsaacEnv
-from omni_drones.robots.drone import MultirotorBase
-from omni_drones.views import RigidPrimView
+from omni_drones.envs.isaac_env import IsaacEnv
+from omni_drones.envs import mdp
+from omni_drones.envs.utils.trajectory import LemniscateTrajectory
+from omni_drones.robots.multirotor import Multirotor, Rotor
+from omni_drones.utils.torch import euler_to_quaternion, quat_rotate_inverse, normalize
+import omni_drones.utils.kit as kit_utils
 
-from tensordict.tensordict import TensorDict, TensorDictBase
-from torchrl.data import UnboundedContinuousTensorSpec, CompositeSpec, DiscreteTensorSpec
-from omni.isaac.debug_draw import _debug_draw
-
-from ..utils import lemniscate, scale_time
-from .utils import attach_payload
 
 class PayloadTrack(IsaacEnv):
     r"""
@@ -88,32 +81,17 @@ class PayloadTrack(IsaacEnv):
     | `reward_distance_scale` | float | 1.6           | Scales the reward based on the distance between the payload and its target.                                                                                                                                                             |
     | `time_encoding`         | bool  | True          | Indicates whether to include time encoding in the observation space. If set to True, a 4-dimensional vector encoding the current progress of the episode is included in the observation. If set to False, this feature is not included. |
     """
-    def __init__(self, cfg, headless):
-        self.reset_thres = cfg.task.reset_thres
-        self.reward_effort_weight = cfg.task.reward_effort_weight
-        self.reward_action_smoothness_weight = cfg.task.reward_action_smoothness_weight
-        self.reward_distance_scale = cfg.task.reward_distance_scale
-        self.time_encoding = cfg.task.time_encoding
+    def __init__(self, cfg):
         self.future_traj_steps = int(cfg.task.future_traj_steps)
-        self.bar_length = cfg.task.bar_length
         assert self.future_traj_steps > 0
+        super().__init__(cfg)
 
-        super().__init__(cfg, headless)
+        self.drone: Multirotor = self.scene["drone"]
+        self.payload_id = self.drone.find_bodies("payload")[0][0]
 
-        self.drone.initialize()
-        randomization = self.cfg.task.get("randomization", None)
-        if randomization is not None:
-            if "drone" in self.cfg.task.randomization:
-                self.drone.setup_randomization(self.cfg.task.randomization["drone"])
-
-        self.init_joint_pos = self.drone.get_joint_positions(True)
-        self.init_joint_vels = torch.zeros_like(self.drone.get_joint_velocities())
-
-        self.payload = RigidPrimView(
-            f"/World/envs/env_*/{self.drone.name}_*/payload",
-            reset_xform_properties=False,
-        )
-        self.payload.initialize()
+        self.init_root_state = self.drone.data.default_root_state.clone()
+        self.init_joint_pos = self.drone.data.default_joint_pos.clone()
+        self.init_joint_vel = self.drone.data.default_joint_vel.clone()
 
         self.init_rpy_dist = D.Uniform(
             torch.tensor([-.1, -.1, 0.], device=self.device) * torch.pi,
@@ -135,213 +113,250 @@ class PayloadTrack(IsaacEnv):
             torch.tensor(0.7, device=self.device),
             torch.tensor(1.0, device=self.device)
         )
-        payload_mass_scale = self.cfg.task.payload_mass_scale
-        self.payload_mass_dist = D.Uniform(
-            torch.as_tensor(payload_mass_scale[0] * self.drone.MASS_0, device=self.device),
-            torch.as_tensor(payload_mass_scale[1] * self.drone.MASS_0, device=self.device)
-        )
-        self.origin = torch.tensor([0., 0., 2.], device=self.device)
-        self.traj_t0 = torch.pi / 2
+        # payload_mass_scale = self.cfg.task.payload_mass_scale
+        # self.payload_mass_dist = D.Uniform(
+        #     torch.as_tensor(payload_mass_scale[0] * self.drone.MASS_0, device=self.device),
+        #     torch.as_tensor(payload_mass_scale[1] * self.drone.MASS_0, device=self.device)
+        # )
 
-        self.traj_c = torch.zeros(self.num_envs, device=self.device)
-        self.traj_scale = torch.zeros(self.num_envs, 3, device=self.device)
-        self.traj_rot = torch.zeros(self.num_envs, 4, device=self.device)
-        self.traj_w = torch.ones(self.num_envs, device=self.device)
+        self.traj_manager = LemniscateTrajectory((self.num_envs,), self.device)
+        self.traj_vis = torch.zeros(self.num_envs, self.max_episode_length, 3, device=self.device)
 
-        self.target_pos = torch.zeros(self.num_envs, self.future_traj_steps, 3, device=self.device)
-
-        self.alpha = 0.8
-
-        self.draw = _debug_draw.acquire_debug_draw_interface()
+        self.waypoints = torch.zeros(self.num_envs, self.future_traj_steps, 3, device=self.device)
+        self.target_pos = self.waypoints[:, 0]
 
     def _design_scene(self):
-        drone_model_cfg = self.cfg.task.drone_model
-        self.drone, self.controller = MultirotorBase.make(
-            drone_model_cfg.name, drone_model_cfg.controller
-        )
+        from omni.isaac.orbit.scene import InteractiveSceneCfg
+        from omni.isaac.orbit.assets import AssetBaseCfg
+        from omni.isaac.orbit.terrains import TerrainImporterCfg
 
-        kit_utils.create_ground_plane(
-            "/World/defaultGroundPlane",
-            static_friction=1.0,
-            dynamic_friction=1.0,
-            restitution=0.0,
-        )
-        self.drone.spawn(translations=[(0.0, 0.0, 1.5)])
-        attach_payload(f"/World/envs/env_0/{self.drone.name}_0", self.cfg.task.bar_length)
-        return ["/World/defaultGroundPlane"]
+        import omni.isaac.orbit.sim as sim_utils
 
-    def _set_specs(self):
-        drone_state_dim = self.drone.state_spec.shape[-1]
-        obs_dim = drone_state_dim + 3 * (self.future_traj_steps-1) + 9
-        if self.time_encoding:
-            self.time_encoding_dim = 4
-            obs_dim += self.time_encoding_dim
-        self.observation_spec = CompositeSpec({
-            "agents": {
-                "observation": UnboundedContinuousTensorSpec((1, obs_dim)),
-                # "intrinsics": self.drone.intrinsics_spec.unsqueeze(0).to(self.device)
-            }
-        }).expand(self.num_envs).to(self.device)
-        self.action_spec = CompositeSpec({
-            "agents": {
-                "action": self.drone.action_spec.unsqueeze(0),
-            }
-        }).expand(self.num_envs).to(self.device)
-        self.reward_spec = CompositeSpec({
-            "agents": {
-                "reward": UnboundedContinuousTensorSpec((1, 1))
-            }
-        }).expand(self.num_envs).to(self.device)
-        self.agent_spec["drone"] = AgentSpec(
-            "drone", 1,
-            observation_key=("agents", "observation"),
-            action_key=("agents", "action"),
-            reward_key=("agents", "reward"),
-        )
+        from omni_drones.robots.assets import HUMMINGBIRD_CFG
 
-        stats_spec = CompositeSpec({
-            "return": UnboundedContinuousTensorSpec(1),
-            "episode_len": UnboundedContinuousTensorSpec(1),
-            "tracking_error": UnboundedContinuousTensorSpec(1),
-            "action_smoothness": UnboundedContinuousTensorSpec(1),
-        }).expand(self.num_envs).to(self.device)
-        self.observation_spec["stats"] = stats_spec
-        self.stats = stats_spec.zero()
+        class SceneCfg(InteractiveSceneCfg):
 
+            terrain = TerrainImporterCfg(
+                prim_path="/World/ground",
+                terrain_type="plane",
+                collision_group=-1,
+            )
+
+            # lights
+            light = AssetBaseCfg(
+                prim_path="/World/light",
+                spawn=sim_utils.DistantLightCfg(color=(0.75, 0.75, 0.75), intensity=3000.0),
+            )
+            sky_light = AssetBaseCfg(
+                prim_path="/World/skyLight",
+                spawn=sim_utils.DomeLightCfg(color=(0.13, 0.13, 0.13), intensity=1000.0),
+            )
+
+            drone = HUMMINGBIRD_CFG
+            drone.prim_path="{ENV_REGEX_NS}/Robot_0"
+            drone.spawn.func = spawn_with_payload
+
+        return SceneCfg(num_envs=self.cfg.num_envs, env_spacing=2.5)
 
     def _reset_idx(self, env_ids: torch.Tensor):
-        self.drone._reset_idx(env_ids)
-        self.traj_c[env_ids] = self.traj_c_dist.sample(env_ids.shape)
-        self.traj_rot[env_ids] = euler_to_quaternion(self.traj_rpy_dist.sample(env_ids.shape))
-        self.traj_scale[env_ids] = self.traj_scale_dist.sample(env_ids.shape)
+        self.traj_manager.c[env_ids] = self.traj_c_dist.sample(env_ids.shape)
+        self.traj_manager.rot[env_ids] = euler_to_quaternion(self.traj_rpy_dist.sample(env_ids.shape))
+        self.traj_manager.scale[env_ids] = self.traj_scale_dist.sample(env_ids.shape)
         traj_w = self.traj_w_dist.sample(env_ids.shape)
-        self.traj_w[env_ids] = torch.randn_like(traj_w).sign() * traj_w
+        self.traj_manager.w[env_ids] = torch.randn_like(traj_w).sign() * traj_w
 
-        t0 = torch.zeros(len(env_ids), device=self.device)
-        pos = lemniscate(t0 + self.traj_t0, self.traj_c[env_ids]) + self.origin
-        pos[..., 2] += self.bar_length
-        rot = euler_to_quaternion(self.init_rpy_dist.sample(env_ids.shape))
-        vel = torch.zeros(len(env_ids), 1, 6, device=self.device)
+        pos_t0 = self.traj_manager.compute(
+            torch.zeros(env_ids.shape, device=self.device),
+            dt=0,
+            ids=env_ids
+        ).reshape(-1, 3)
 
-        self.drone.set_world_poses(
-            pos + self.envs_positions[env_ids], rot, env_ids
-        )
-        self.drone.set_velocities(vel, env_ids)
-        self.drone.set_joint_positions(self.init_joint_pos[env_ids], env_ids)
-        self.drone.set_joint_velocities(self.init_joint_vels[env_ids], env_ids)
-
-        payload_mass = self.payload_mass_dist.sample(env_ids.shape)
-        self.payload.set_masses(payload_mass, env_ids)
-
-        self.stats[env_ids] = 0.
-
-        if self._should_render(0) and (env_ids == self.central_env_idx).any():
-            # visualize the trajectory
-            self.draw.clear_lines()
-
-            traj_vis = self._compute_traj(self.max_episode_length, self.central_env_idx.unsqueeze(0))[0]
-            traj_vis = traj_vis + self.envs_positions[self.central_env_idx]
-            point_list_0 = traj_vis[:-1].tolist()
-            point_list_1 = traj_vis[1:].tolist()
-            colors = [(1.0, 1.0, 1.0, 1.0) for _ in range(len(point_list_0))]
-            sizes = [1 for _ in range(len(point_list_0))]
-            self.draw.draw_lines(point_list_0, point_list_1, colors, sizes)
-
-    def _pre_sim_step(self, tensordict: TensorDictBase):
-        actions = tensordict[("agents", "action")]
-        self.effort = self.drone.apply_action(actions)
-
-    def _compute_state_and_obs(self):
-        self.drone_state = self.drone.get_state()
-        self.payload_pos = self.get_env_poses(self.payload.get_world_poses())[0]
-        self.payload_vels = self.payload.get_velocities()
-
-        self.target_pos[:] = self._compute_traj(self.future_traj_steps, step_size=5)
-
-        self.drone_payload_rpos = self.drone.pos - self.payload_pos.unsqueeze(1)
-        self.target_payload_rpos = (self.target_pos - self.payload_pos.unsqueeze(1))
-
-        obs = [
-            self.drone_payload_rpos.flatten(1).unsqueeze(1),
-            self.target_payload_rpos.flatten(1).unsqueeze(1),
-            self.drone_state[..., 3:],
-            self.payload_vels.unsqueeze(1), # 6
-        ]
-        if self.time_encoding:
-            t = (self.progress_buf / self.max_episode_length).unsqueeze(-1)
-            obs.append(t.expand(-1, self.time_encoding_dim).unsqueeze(1))
-        obs = torch.cat(obs, dim=-1)
-
-        self.stats["action_smoothness"].lerp_(-self.drone.throttle_difference, (1-self.alpha))
-
-        return TensorDict(
-            {
-                "agents": {
-                    "observation": obs,
-                },
-                "stats": self.stats.clone(),
-            },
-            self.batch_size,
+        init_root_state = self.init_root_state[env_ids]
+        init_root_state[..., :3] = (
+            pos_t0
+            + self.scene.env_origins[env_ids]
+            + torch.tensor([0., 0., 0.8], device=self.device)
         )
 
-    def _compute_reward_and_done(self):
-        # pos reward
-        pos_rror = torch.norm(self.target_payload_rpos[:, [0]], dim=-1)
-
-        reward_pos = torch.exp(-self.reward_distance_scale * pos_rror)
-
-        # uprightness
-        tiltage = torch.abs(1 - self.drone.up[..., 2])
-        reward_up = 0.5 / (1.0 + torch.square(tiltage))
-
-        # effort
-        reward_effort = self.reward_effort_weight * torch.exp(-self.effort)
-        reward_action_smoothness = self.reward_action_smoothness_weight * torch.exp(-self.drone.throttle_difference)
-
-        # spin reward
-        spin = torch.square(self.drone.vel[..., -1])
-        reward_spin = 0.5 / (1.0 + torch.square(spin))
-
-        reward = (
-            reward_pos
-            + reward_pos * (reward_up + reward_spin)
-            + reward_effort
-            + reward_action_smoothness
+        self.drone.write_root_state_to_sim(init_root_state, env_ids)
+        self.drone.write_joint_state_to_sim(
+            self.init_joint_pos[env_ids],
+            self.init_joint_vel[env_ids],
+            env_ids=env_ids
         )
 
-        misbehave = (self.drone.pos[..., 2] < 0.1) | (pos_rror > self.reset_thres)
-        hasnan = torch.isnan(self.drone_state).any(-1)
+        if self.sim.has_gui():
+            self.traj_vis[env_ids] = (
+                self.traj_manager.compute(
+                    torch.zeros(env_ids.shape, device=self.device),
+                    dt=self.step_dt,
+                    steps=self.max_episode_length,
+                    ids=env_ids
+                )
+                + self.scene.env_origins[env_ids].unsqueeze(1)
+            )
 
-        terminated = misbehave | hasnan
-        truncated = (self.progress_buf >= self.max_episode_length).unsqueeze(-1)
-
-        self.stats["tracking_error"].add_(pos_rror)
-        self.stats["action_smoothness"].lerp_(-self.drone.throttle_difference, (1-self.alpha))
-        self.stats["return"].add_(reward)
-        self.stats["episode_len"][:] = self.progress_buf.unsqueeze(1)
-
-        return TensorDict(
-            {
-                "agents": {
-                    "reward": reward.unsqueeze(-1),
-                },
-                "done": terminated | truncated,
-                "terminated": terminated,
-                "truncated": truncated,
-            },
-            self.batch_size,
+    def update(self):
+        self.waypoints[:] = self.traj_manager.compute(
+            self.progress_buf * self.step_dt,
+            dt=self.step_dt * 5,
+            steps=self.future_traj_steps,
         )
 
-    def _compute_traj(self, steps: int, env_ids=None, step_size: float=1.):
-        if env_ids is None:
-            env_ids = ...
-        t = self.progress_buf[env_ids].unsqueeze(1) + step_size * torch.arange(steps, device=self.device)
-        t = self.traj_t0 + scale_time(self.traj_w[env_ids].unsqueeze(1) * t * self.dt)
-        traj_rot = self.traj_rot[env_ids].unsqueeze(1).expand(-1, t.shape[1], 4)
+    def debug_vis(self):
+        for i in range(self.num_envs):
+            self.debug_draw.plot(self.traj_vis[i])
+            self.debug_draw.plot(
+                self.waypoints[i] + self.scene.env_origins[i].unsqueeze(0),
+                size=4,
+                color=(0, 1, 0, 1)
+            )
+        payload_pos = self.drone.data.body_pos_w[:, self.payload_id]
+        self.debug_draw.vector(
+            payload_pos,
+            self.target_pos - (payload_pos - self.scene.env_origins)
+        )
 
-        target_pos = vmap(lemniscate)(t, self.traj_c[env_ids])
-        target_pos = vmap(quat_rotate)(traj_rot, target_pos) * self.traj_scale[env_ids].unsqueeze(1)
 
-        return self.origin + target_pos
+    class Waypoints(mdp.ObservationFunc):
+
+        def __init__(self, env: IsaacEnv):
+            super().__init__(env)
+            self.drone: Multirotor = self.env.scene["drone"]
+            self.body_id = self.drone.find_bodies("payload")[0][0]
+
+        def compute(self) -> torch.Tensor:
+            if not hasattr(self.env, "waypoints"):
+                return torch.zeros(self.num_envs, 3 * self.env.future_traj_steps, device=self.device)
+            pos = (
+                self.drone.data.body_pos_w[:, self.body_id].unsqueeze(1)
+                - self.env.scene.env_origins.unsqueeze(1)
+                - self.env.waypoints
+            )
+            pos = quat_rotate_inverse(
+                self.drone.data.root_quat_w.unsqueeze(1),
+                pos
+            )
+            return pos.reshape(self.num_envs, -1)
 
 
+    class PosTrackingErrorExp(mdp.RewardFunc):
+        def __init__(self, env, scale: float, weight: float = 1.):
+            super().__init__(env, weight)
+            self.scale = scale
+            self.drone: Multirotor = self.env.scene["drone"]
+            self.body_id = self.drone.find_bodies("payload")[0][0]
+
+        def compute(self) -> torch.Tensor:
+            error = (
+                self.drone.data.body_pos_w[:, self.body_id]
+                - self.env.scene.env_origins
+                - self.env.target_pos
+            )
+            error = torch.norm(error, dim=-1, keepdim=True)
+            return torch.exp(- self.scale * error)
+
+    class YawTrackingDot(mdp.RewardFunc):
+        def __init__(self, env: IsaacEnv, weight: float = 1):
+            super().__init__(env, weight)
+            self.drone: Multirotor = self.env.scene["drone"]
+
+        def compute(self) -> torch.Tensor:
+            dot = (
+                self.drone.data.heading_w_vec[:, :2]
+                * normalize(self.drone.data.root_lin_vel_w[:, :2])
+            ).sum(-1, True)
+            return dot
+
+    class SpinPenaltyRational(mdp.RewardFunc):
+        def __init__(self, env, weight: float = 1.):
+            super().__init__(env, weight)
+            self.drone: Multirotor = self.env.scene["drone"]
+
+        def compute(self) -> torch.Tensor:
+            spin = torch.square(self.drone.data.root_ang_vel_b[..., [2]])
+            return 1.0 / (1.0 + torch.square(spin))
+
+
+    class TrackingErrorExceeds(mdp.mdp_term.TrackingErrorExceeds):
+        def __init__(
+            self,
+            env: IsaacEnv,
+            thres: float
+        ):
+            super(mdp.mdp_term.TrackingErrorExceeds, self).__init__(env)
+            self.robot: Multirotor = self.env.scene["drone"]
+            self.body_id = self.robot.find_bodies("payload")[0][0]
+            self.thres = thres
+
+        def compute(self) -> torch.Tensor:
+            pos_diff = (
+                self.robot.data.body_pos_w[:, self.body_id]
+                - self.env.scene.env_origins
+                - self.env.target_pos
+            )
+            pos_error = pos_diff.norm(dim=-1, keepdim=True)
+            terminated = (pos_error > self.thres)
+            return terminated
+
+
+import omni.isaac.core.utils.prims as prim_utils
+import omni.physx.scripts.utils as script_utils
+import omni.isaac.core.objects as objects
+import omni_drones.utils.kit as kit_utils
+from omni.isaac.orbit.sim.spawners.from_files.from_files_cfg import UsdFileCfg
+from omni_drones.utils.orbit import _spawn_from_usd_file, clone, multi
+from pxr import Usd, UsdPhysics
+
+
+def spawn_with_payload(
+    prim_path: str,
+    cfg: UsdFileCfg,
+    translation: tuple[float, float, float] | None = None,
+    orientation: tuple[float, float, float, float] | None = None,
+    parent_prim: str = "base_link",
+    bar_length: float = 0.8,
+    payload_radius: float = 0.04,
+    payload_mass: float = 0.15
+) -> Usd.Prim:
+    prim = _spawn_from_usd_file(prim_path, cfg.usd_path, cfg, translation, orientation)
+    bar = prim_utils.create_prim(
+        prim_path=prim_path + "/bar",
+        prim_type="Capsule",
+        translation=(0., 0., -bar_length / 2.),
+        attributes={"radius": 0.01, "height": bar_length}
+    )
+    UsdPhysics.RigidBodyAPI.Apply(bar)
+    UsdPhysics.CollisionAPI.Apply(bar)
+    massAPI = UsdPhysics.MassAPI.Apply(bar)
+    massAPI.CreateMassAttr().Set(0.001)
+
+    base_link = prim_utils.get_prim_at_path(prim_path + "/" + parent_prim)
+    stage = prim_utils.get_current_stage()
+    joint = script_utils.createJoint(stage, "D6", bar, base_link)
+    joint.GetAttribute("limit:rotX:physics:low").Set(-120)
+    joint.GetAttribute("limit:rotX:physics:high").Set(120)
+    joint.GetAttribute("limit:rotY:physics:low").Set(-120)
+    joint.GetAttribute("limit:rotY:physics:high").Set(120)
+    UsdPhysics.DriveAPI.Apply(joint, "rotX")
+    UsdPhysics.DriveAPI.Apply(joint, "rotY")
+    joint.GetAttribute("drive:rotX:physics:damping").Set(2e-6)
+    joint.GetAttribute("drive:rotY:physics:damping").Set(2e-6)
+
+    payload = objects.DynamicSphere(
+        prim_path=prim_path + "/payload",
+        translation=(0., 0., -bar_length),
+        radius=payload_radius,
+        mass=payload_mass
+    )
+    joint = script_utils.createJoint(stage, "Fixed", bar, payload.prim)
+    kit_utils.set_collision_properties(
+        prim_path + "/bar", contact_offset=0.02, rest_offset=0.001
+    )
+    kit_utils.set_collision_properties(
+        prim_path + "/payload", contact_offset=0.02, rest_offset=0.001
+    )
+    return prim
+
+spawn_with_payload = clone(spawn_with_payload)
+spawn_with_payload = multi(spawn_with_payload)

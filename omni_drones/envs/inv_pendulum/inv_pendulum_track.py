@@ -29,7 +29,6 @@ from torchrl.data import UnboundedContinuousTensorSpec, CompositeSpec, DiscreteT
 
 import omni.isaac.core.objects as objects
 import omni_drones.utils.kit as kit_utils
-from omni.isaac.debug_draw import _debug_draw
 
 from omni_drones.utils.torch import euler_to_quaternion, normalize, quat_rotate
 from omni_drones.envs.isaac_env import AgentSpec, IsaacEnv
@@ -151,7 +150,6 @@ class InvPendulumTrack(IsaacEnv):
 
         self.alpha = 0.8
 
-        self.draw = _debug_draw.acquire_debug_draw_interface()
 
     def _design_scene(self):
         drone_model_cfg = self.cfg.task.drone_model

@@ -31,6 +31,10 @@ from omni_drones.learning import ALGOS
 from setproctitle import setproctitle
 from torchrl.envs.transforms import TransformedEnv, InitTracker, Compose
 
+torch.backends.cuda.matmul.allow_tf32 = True
+torch.backends.cudnn.allow_tf32 = True
+torch.backends.cudnn.deterministic = False
+torch.backends.cudnn.benchmark = False
 
 @hydra.main(version_base=None, config_path=".", config_name="train")
 def main(cfg):
@@ -45,7 +49,7 @@ def main(cfg):
     from omni_drones.envs.isaac_env import IsaacEnv
 
     env_class = IsaacEnv.REGISTRY[cfg.task.name]
-    base_env = env_class(cfg, headless=cfg.headless)
+    base_env = env_class(cfg)
 
     transforms = [InitTracker()]
 
@@ -75,16 +79,13 @@ def main(cfg):
     env = TransformedEnv(base_env, Compose(*transforms)).train()
     env.set_seed(cfg.seed)
 
-    try:
-        policy = ALGOS[cfg.algo.name.lower()](
-            cfg.algo,
-            env.observation_spec,
-            env.action_spec,
-            env.reward_spec,
-            device=base_env.device
-        )
-    except KeyError:
-        raise NotImplementedError(f"Unknown algorithm: {cfg.algo.name}")
+    policy = ALGOS[cfg.algo.name.lower()](
+        cfg.algo,
+        env.observation_spec,
+        env.action_spec,
+        env.reward_spec,
+        device=base_env.device
+    )
 
     frames_per_batch = env.num_envs * int(cfg.algo.train_every)
     total_frames = cfg.get("total_frames", -1) // frames_per_batch * frames_per_batch
@@ -92,8 +93,11 @@ def main(cfg):
     eval_interval = cfg.get("eval_interval", -1)
     save_interval = cfg.get("save_interval", -1)
 
+    log_interval = (base_env.max_episode_length // cfg.algo.train_every) + 1
+    logging.info(f"Log interval: {log_interval} steps")
+
     stats_keys = [
-        k for k in base_env.observation_spec.keys(True, True)
+        k for k in base_env.reward_spec.keys(True, True)
         if isinstance(k, tuple) and k[0]=="stats"
     ]
     episode_stats = EpisodeStats(stats_keys)
@@ -112,7 +116,6 @@ def main(cfg):
         exploration_type: ExplorationType=ExplorationType.MODE
     ):
 
-        base_env.enable_render(True)
         base_env.eval()
         env.eval()
         env.set_seed(seed)
@@ -128,7 +131,6 @@ def main(cfg):
                 break_when_any_done=False,
                 return_contiguous=False,
             )
-        base_env.enable_render(not cfg.headless)
         env.reset()
 
         done = trajs.get(("next", "done"))
@@ -169,12 +171,10 @@ def main(cfg):
         info = {"env_frames": collector._frames, "rollout_fps": collector._fps}
         episode_stats.add(data.to_tensordict())
 
-        if len(episode_stats) >= base_env.num_envs:
-            stats = {
-                "train/" + (".".join(k) if isinstance(k, tuple) else k): torch.mean(v.float()).item()
-                for k, v in episode_stats.pop().items(True, True)
-            }
-            info.update(stats)
+        if i % log_interval == 0:
+            for k, v in sorted(episode_stats.pop().items(True, True)):
+                key = "train/" + (".".join(k) if isinstance(k, tuple) else k)
+                info[key] = torch.mean(v.float()).item()
 
         info.update(policy.train_op(data.to_tensordict()))
 
@@ -200,11 +200,6 @@ def main(cfg):
         if max_iters > 0 and i >= max_iters - 1:
             break
 
-    logging.info(f"Final Eval at {collector._frames} steps.")
-    info = {"env_frames": collector._frames}
-    info.update(evaluate())
-    run.log(info)
-
     try:
         ckpt_path = os.path.join(run.dir, "checkpoint_final.pt")
         torch.save(policy.state_dict(), ckpt_path)
@@ -222,6 +217,11 @@ def main(cfg):
         logging.info(f"Saved checkpoint to {str(ckpt_path)}")
     except AttributeError:
         logging.warning(f"Policy {policy} does not implement `.state_dict()`")
+
+    logging.info(f"Final Eval at {collector._frames} steps.")
+    info = {"env_frames": collector._frames}
+    info.update(evaluate())
+    run.log(info)
 
     wandb.finish()
 

@@ -8,10 +8,10 @@ import math
 from typing import Optional, Sequence
 
 import carb
-import omni.isaac.core.utils.nucleus as nucleus_utils
-import omni.isaac.core.utils.prims as prim_utils
+import isaacsim.core.utils.nucleus as nucleus_utils
+import isaacsim.core.utils.prims as prim_utils
 import omni.kit
-from omni.isaac.core.materials import PhysicsMaterial
+from isaacsim.core.api.materials import PhysicsMaterial
 from omni.isaac.core.prims import GeometryPrim
 from omni.isaac.version import get_version
 from pxr import Gf, PhysxSchema, UsdPhysics
@@ -55,7 +55,7 @@ def create_ground_plane(
     else:
         # get path to the nucleus server
         # assets_root_path = nucleus_utils.get_assets_root_path()
-        assets_root_path = "http://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/4.1"
+        assets_root_path = "http://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/4.5"
         print("Assets root path: ", assets_root_path)
         if assets_root_path is None:
             carb.log_error("Unable to access the Isaac Sim assets folder on Nucleus server.")

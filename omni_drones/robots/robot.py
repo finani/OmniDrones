@@ -26,13 +26,12 @@ import os.path as osp
 from contextlib import contextmanager
 from typing import Dict, Sequence, Type
 
-import omni.isaac.core.utils.prims as prim_utils
-import omni.isaac.core.utils.torch as torch_utils
+import isaacsim.core.utils.prims as prim_utils
 
 import omni.timeline
 import torch
 from omni_drones.views import ArticulationView, RigidPrimView
-from omni.isaac.core.simulation_context import SimulationContext
+import isaacsim.core.api.simulation_context as simulation_context
 from torchrl.data import TensorSpec
 
 import omni_drones.utils.kit as kit_utils
@@ -73,13 +72,13 @@ class RobotBase(abc.ABC):
 
         self.n = 0
 
-        if SimulationContext._instance is None:
+        if simulation_context.SimulationContext.instance() is None:
             raise RuntimeError("The SimulationContext is not created.")
 
         self.cfg = cfg
-        self.device = SimulationContext.instance()._device
-        self.dt = SimulationContext.instance().get_physics_dt()
-        self.gravity = SimulationContext.instance().get_physics_context().get_gravity()
+        self.device = simulation_context.SimulationContext.instance()._device
+        self.dt = simulation_context.SimulationContext.instance().get_physics_dt()
+        self.gravity = simulation_context.SimulationContext.instance().get_physics_context().get_gravity()
         self.state_spec: TensorSpec
         self.action_spec: TensorSpec
         self.initialized = False
@@ -98,7 +97,7 @@ class RobotBase(abc.ABC):
         orientations=None,
         prim_paths: Sequence[str] = None
     ):
-        if SimulationContext.instance()._physics_sim_view is not None:
+        if simulation_context.SimulationContext.instance().physics_sim_view is not None:
             raise RuntimeError(
                 "Cannot spawn robots after simulation_context.reset() is called."
             )
@@ -160,7 +159,7 @@ class RobotBase(abc.ABC):
         self,
         prim_paths_expr: str = None,
     ):
-        if SimulationContext.instance()._physics_sim_view is None:
+        if simulation_context.SimulationContext.instance().physics_sim_view is None:
             raise RuntimeError(
                 f"Cannot initialize {self.__class__.__name__} before the simulation context resets."
                 "Call simulation_context.reset() first."

@@ -24,7 +24,7 @@ def main(cfg):
         backend="torch",
         device=cfg.sim.device,
     )
-    n = 4
+    n = 1
 
     drone_model_cfg = cfg.drone_model
     drone, controller = MultirotorBase.make(

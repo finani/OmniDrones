@@ -24,7 +24,7 @@
 import torch
 import torch.distributions as D
 
-import omni.isaac.core.utils.prims as prim_utils
+import isaacsim.core.utils.prims as prim_utils
 
 from omni_drones.envs.isaac_env import AgentSpec, IsaacEnv
 from omni_drones.robots.drone import MultirotorBase
@@ -36,7 +36,7 @@ from torchrl.data import UnboundedContinuousTensorSpec, CompositeSpec, DiscreteT
 
 
 def attach_payload(parent_path):
-    from omni.isaac.core import objects
+    import isaacsim.core.api.objects as objects
     import omni.physx.scripts.utils as script_utils
     from pxr import UsdPhysics
 
@@ -167,7 +167,7 @@ class Hover(IsaacEnv):
 
     def _design_scene(self):
         import omni_drones.utils.kit as kit_utils
-        import omni.isaac.core.utils.prims as prim_utils
+        import isaacsim.core.utils.prims as prim_utils
 
         drone_model_cfg = self.cfg.task.drone_model
         self.drone, self.controller = MultirotorBase.make(

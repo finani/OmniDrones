@@ -98,21 +98,6 @@ To verify the installation, run
 In general, YOUR_WANDB_ENTITY is your wandb ID.
 If you don't want to add arguments every time, edit ``scripts/train.yaml``
 
-
-
-
-
-
-
-If you encounter the following error,
-try `TypeError: ArticulationView.get_world_poses() got an unexpected keyword argument 'usd' <troubleshooting.html#typeerror-articulationview-get-world-poses-got-an-unexpected-keyword-argument-usd>`_ .
-
-.. code-block:: bash
-
-    File "/${HOME}/.local/share/ov/pkg/isaac-sim-4.1.0/exts/omni.isaac.core/omni/isaac/core/prims/xform_prim_view.py", line 189, in __init__
-        default_positions, default_orientations = self.get_world_poses(usd=usd)
-    TypeError: ArticulationView.get_world_poses() got an unexpected keyword argument 'usd'
-
 Developer Guide: Working with VSCode
 ------------------------------------
 
@@ -142,37 +127,44 @@ Developer Guide: Python Environments
     :widths: 25 25 25 25 25 25
     :header-rows: 1
 
-    * -
-      - Isaac Sim 2022.*
-      - Isaac Sim 2023.*
-      - Isaac Sim 4.0, 4.1, 4.2
-      - Isaac Lab 1.*
-      - Isaac Sim 4.5, Isaac Lab 2.0
+    * - `Isaac Sim <https://pypi.org/project/isaacsim/>`_
+      - 2022.*
+      - 2023.*
+      - 4.0.0.0, 4.1.0.0
+      - 4.2.0.2
+      - 4.5.0.0
+    * - Isaac Lab
+      -
+      -
+      - 1.0.0, 1.1.0
+      - 1.2.0, 1.3.0, 1.4.0, 1.4.1
+      - 2.0.0
     * - python
       - 3.7
       - 3.10
       - 3.10
       - 3.10
       - 3.10
-    * - pytorch
+    * - `pytorch <https://pypi.org/project/torch/>`_
       - 1.10.0+cu113
       - 2.0.1+cu118
-      - 2.2.2+cu118
-      - 2.2.2+cu118
+      - 2.2.2+cu118 or 2.2.2+cu121
+      - 2.4.0+cu118 or 2.4.0+cu121
       - 2.5.1+cu118 or 2.5.1+cu121
-    * - torchrl
+    * - `torchrl <https://pypi.org/project/torchrl/>`_
       -
       - 0.1.1
       - 0.3.1
       - 0.3.1
-      - 0.3.1
-    * - tensordict
+      - 0.5.0
+      - 0.6.0 (0.5.0 for tensordict==0.5.0)
+    * - `tensordict <https://pypi.org/project/tensordict/>`_
       -
       - 0.1.1
       - 0.3.2
       - 0.3.2
-      - 0.3.2
-      - 0.6.2
+      - 0.5.0
+      - 0.6.2 (0.5.0, now for make_funtional)
 
 Developer Guide: Test Run
 -------------------------

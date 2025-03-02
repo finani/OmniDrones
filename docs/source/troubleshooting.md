@@ -75,6 +75,19 @@ If the CUDA error below is occurred, check whether the CUDA version is 11.8. If 
 conda clean --all
 ```
 
+### libGL error: MESA-LOADER
+
+```console
+libGL error: MESA-LOADER: failed to open iris: /usr/lib/dri/iris_dri.so: cannot open shared object file: No such file or directory (search paths /usr/lib/x86_64-linux-gnu/dri:\$${ORIGIN}/dri:/usr/lib/dri, suffix _dri)
+libGL error: failed to load driver: iris
+```
+
+If you encounter this error, please install the following
+
+```console
+conda install -c conda-forge libstdcxx-ng
+```
+
 ## Isaac Sim-related Issues
 
 ### TypeError: ArticulationView.get_world_poses() got an unexpected keyword argument 'usd'
@@ -82,10 +95,10 @@ conda clean --all
 If you encounter the unexpected keyword error in Isaac Sim 4.*, remove **usd=usd** from **xform_prim_view.py**.
 
 ```console
-# open /${HOME}/.local/share/ov/pkg/isaac-sim-4.1.0/exts/omni.isaac.core/omni/isaac/core/prims/xform_prim_view.py
-# go to line 189 (for 4.1.0), 184 (for 4.0.0)
+# open /$CONDA_PREFIX/exts/isaacsim.core.prims/isaacsim/core/prims/impl/xform_prim.py
+# go to line 161
 
-# L184
+# L161
 # default_positions, default_orientations = self.get_world_poses(usd=usd)
 
 # remove usd=usd as shown below

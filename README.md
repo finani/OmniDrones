@@ -4,7 +4,7 @@
 
 # OmniDrones
 
-[![IsaacSim](https://img.shields.io/badge/Isaac%20Sim-4.1.0-orange.svg)](https://docs.omniverse.nvidia.com/app_isaacsim/app_isaacsim/overview.html)
+[![IsaacSim](https://img.shields.io/badge/Isaac%20Sim-4.5.0-orange.svg)](https://docs.omniverse.nvidia.com/app_isaacsim/app_isaacsim/overview.html)
 [![Python](https://img.shields.io/badge/python-3.10-blue.svg)](https://docs.python.org/3/whatsnew/3.7.html)
 [![Docs status](https://img.shields.io/badge/docs-passing-brightgreen.svg)](https://omnidrones.readthedocs.io/en/latest/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
@@ -18,7 +18,7 @@ Welcome to join our [Discord](https://discord.gg/J4QvXR6tQj) for discussions and
 
 ## Notice
 
-The initial release of **OmniDrones** is developed based on Isaac Sim 2022.2.0. It can be found at the [release](https://github.com/btx0424/OmniDrones/tree/release) branch. The current version is developed based on Isaac Sim 4.1.0.
+The initial release of **OmniDrones** is developed based on Isaac Sim 2022.2.0. It can be found at the [release](https://github.com/btx0424/OmniDrones/tree/release) branch. The current version is developed based on Isaac Sim 4.5.0.
 
 ## Announcement 2023-09-25
 
@@ -32,6 +32,12 @@ The new release of Isaac Sim (2023.1.0) has brought substantial changes as well 
 which the most important is new sensors. We are actively working on it at the `devel` branch. The `release`
 branch will still be maintained for compatibility. Feel free to raise issues if you encounter any problems
 or have ideas to discuss.
+
+## Announcement 2025-03-01
+
+The new release of Isaac Sim (4.5.0) and Isaac Lab (2.0.0) brings significant changes, both in overall
+structure and functionality. It will probably take a long time to support all features, but feel free to
+raise issues if you encounter any problems or have ideas to discuss.
 
 ## Citation
 

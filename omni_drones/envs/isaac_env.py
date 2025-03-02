@@ -1,17 +1,17 @@
 # MIT License
-# 
+#
 # Copyright (c) 2023 Botian Xu, Tsinghua University
-# 
+#
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
 # in the Software without restriction, including without limitation the rights
 # to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
 # copies of the Software, and to permit persons to whom the Software is
 # furnished to do so, subject to the following conditions:
-# 
+#
 # The above copyright notice and this permission notice shall be included in all
 # copies or substantial portions of the Software.
-# 
+#
 # THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 # IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
 # FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
@@ -32,9 +32,9 @@ import inspect
 
 from tensordict.tensordict import TensorDict, TensorDictBase
 from torchrl.data import (
-    Composite, 
-    TensorSpec, 
-    UnboundedContinuous, 
+    Composite,
+    TensorSpec,
+    UnboundedContinuous,
     Binary
 )
 from torchrl.envs import EnvBase
@@ -43,19 +43,19 @@ from omni_drones.utils.torchrl import AgentSpec
 
 from collections import OrderedDict
 
-from omni.isaac.lab.scene import InteractiveScene
-from omni.isaac.lab.sim import SimulationContext
-from omni.isaac.lab.utils.timer import Timer
+from isaaclab.scene import InteractiveScene
+from isaaclab.sim import SimulationContext
+from isaaclab.utils.timer import Timer
 
-import omni.isaac.lab.sim as sim_utils
+import isaaclab.sim as sim_utils
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple, Type, Union, Callable
 
 class DebugDraw:
     def __init__(self):
-        from omni.isaac.debug_draw import _debug_draw
+        from isaacsim.util.debug_draw import _debug_draw
         self._draw = _debug_draw.acquire_debug_draw_interface()
-    
+
     def clear(self):
         self._draw.clear_lines()
         self._draw.clear_points()
@@ -69,7 +69,7 @@ class DebugDraw:
         sizes = [size] * len(point_list_0)
         colors = [color] * len(point_list_0)
         self._draw.draw_lines(point_list_0, point_list_1, colors, sizes)
-        
+
     def vector(self, x: torch.Tensor, v: torch.Tensor, size=2.0, color=(0., 1., 1., 1.)):
         x = x.cpu().reshape(-1, 3)
         v = v.cpu().reshape(-1, 3)
@@ -80,7 +80,7 @@ class DebugDraw:
         sizes = [size] * len(point_list_0)
         colors = [color] * len(point_list_0)
         self._draw.draw_lines(point_list_0, point_list_1, colors, sizes)
-    
+
 @dataclass
 class TaskCfg:
     num_envs: int = 1
@@ -117,7 +117,7 @@ class IsaacEnv(EnvBase):
             self.sim = SimulationContext(sim_cfg)
         else:
             raise RuntimeError("Simulation context already exists. Cannot create a new one.")
-        
+
         # set camera view for "/OmniverseKit_Persp" camera
         self.sim.set_camera_view(eye=self.cfg.viewer.eye, target=self.cfg.viewer.lookat)
         # create render product
@@ -153,7 +153,7 @@ class IsaacEnv(EnvBase):
                 self.sim.reset()
         for _ in range(4):
             self.sim.step(render=True)
-        
+
         self.scene.update(0.)
         self.step_dt = self.physics_dt * self.substeps
 
@@ -173,6 +173,8 @@ class IsaacEnv(EnvBase):
             self.batch_size,
         )
         self.progress_buf = self._tensordict["progress"]
+
+        self.resolve_specs()
 
     def resolve_specs(self):
         self._update_common()
@@ -220,7 +222,7 @@ class IsaacEnv(EnvBase):
             for obs_name, params in group["items"].items():
                 observation_group[obs_name] = OBS_FUNCS[obs_name](self, **params)
             self.observation_funcs[key] = observation_group
-        
+
         self.action_groups = OrderedDict()
         action_spec = Composite({}, shape=[self.num_envs])
         for group in self.task_cfg.actions:
@@ -234,13 +236,13 @@ class IsaacEnv(EnvBase):
             self.action_groups[key] = action_group
             action_spec[key] = UnboundedContinuous(action_group.action_shape)
         self.action_spec = action_spec.to(self.device)
-        
+
         obs = self._compute_observation()
         observation_spec = Composite({}, shape=[self.num_envs])
         for k, v in obs.items(True, True):
             observation_spec[k] = UnboundedContinuous(v.shape)
         self.observation_spec = observation_spec.to(self.device)
-        
+
         self.reward_funcs = OrderedDict()
         for key, params in self.task_cfg.rewards.items():
             self.reward_funcs[key] = REW_FUNCS[key](self, **params)
@@ -277,7 +279,7 @@ class IsaacEnv(EnvBase):
     def num_envs(self) -> int:
         """The number of instances of the environment that are running."""
         return self.scene.num_envs
-    
+
     @property
     def physics_dt(self) -> float:
         return self.sim.get_physics_dt()
@@ -296,7 +298,7 @@ class IsaacEnv(EnvBase):
         if not hasattr(self, "_agent_spec"):
             self._agent_spec = {}
         return _AgentSpecView(self)
-    
+
     @agent_spec.setter
     def agent_spec(self, value):
         raise AttributeError(
@@ -363,7 +365,7 @@ class IsaacEnv(EnvBase):
             self.debug_draw.clear()
             for callback in self._debug_vis_callbacks:
                 callback()
-        
+
         self.progress_buf += 1
         tensordict = TensorDict({}, self.batch_size, device=self.device)
         tensordict.update(self._compute_observation())
@@ -374,7 +376,7 @@ class IsaacEnv(EnvBase):
         tensordict.set("truncated", truncated)
         tensordict.set("done", terminated | truncated)
         return tensordict
-    
+
     def _compute_observation(self):
         observation = TensorDict({}, [self.num_envs])
         for group, funcs in self.observation_funcs.items():
@@ -415,7 +417,7 @@ class IsaacEnv(EnvBase):
 
     def debug_vis(self):
         pass
-    
+
     def enable_render(self, enable: Union[bool, Callable]=True):
         if isinstance(enable, bool):
             self._should_render = lambda substep: enable
@@ -423,7 +425,7 @@ class IsaacEnv(EnvBase):
             self._should_render = enable
         else:
             raise TypeError("enable_render must be a bool or callable.")
-    
+
     def render(self, mode: str="human"):
         self.sim.render()
         if mode == "human":

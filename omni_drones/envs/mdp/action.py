@@ -7,13 +7,13 @@ from collections import OrderedDict
 from typing import Tuple
 
 class ActionFunc(MDPTerm):
-    
+
     action_shape: torch.Size
 
     @property
     def action_shape(self):
         raise NotImplementedError
-    
+
     def apply_action(self, action: torch.Tensor):
         pass
 
@@ -23,13 +23,13 @@ class ActionGroup:
         assert isinstance(action_funcs, OrderedDict), "ActionGroup requires an OrderedDict of ActionFuncs."
         self.action_funcs = action_funcs
         action_shapes = {key: func.action_shape for key, func in self.action_funcs.items()}
-        
+
         try:
             self.action_shape = torch.cat([torch.zeros(shape) for shape in action_shapes.values()], dim=-1).shape
             self.action_split = [shape[-1] for shape in action_shapes.values()]
         except Exception:
             raise ValueError(f"Incompatible action shapes: {action_shapes}")
-    
+
     def apply_action(self, action: torch.Tensor):
         action_split = torch.split(action, self.action_split, dim=-1)
         for action_func, action in zip(self.action_funcs.values(), action_split):
@@ -45,7 +45,7 @@ class RotorCommand(ActionFunc):
     @property
     def action_shape(self):
         return self.rotor.shape
-    
+
     def apply_action(self, action: torch.Tensor):
         self.rotor.throttle_target[:] = ((action + 1.) / 2.).clamp(0., 1.).sqrt()
 
@@ -54,20 +54,20 @@ from omni_drones.utils.torch import (
     quat_mul,
     quat_rotate_inverse,
     quat_rotate,
-    normalize, 
+    normalize,
     quaternion_to_rotation_matrix,
     quaternion_to_euler,
     axis_angle_to_quaternion,
     axis_angle_to_matrix,
     manual_batch
-    
+
 )
 
 class LeePositionController(ActionFunc):
 
     def __init__(
-        self, 
-        env: "IsaacEnv", 
+        self,
+        env: "IsaacEnv",
         asset_name: str,
         pos_gain: Tuple[float, float, float],
         vel_gain: Tuple[float, float, float],
@@ -86,7 +86,7 @@ class LeePositionController(ActionFunc):
         for i, dim in zip([pos, vel, yaw], [3, 3, 1]):
             self.action_dim += dim * i
 
-        rotor_pos_w = self.asset._data.body_pos_w[0, self.rotor.body_ids, :] 
+        rotor_pos_w = self.asset._data.body_pos_w[0, self.rotor.body_ids, :]
         rotor_pos_b = quat_rotate_inverse(
             self.asset._data.root_quat_w[0].unsqueeze(0),
             rotor_pos_w - self.asset._data.root_pos_w[0].unsqueeze(0)
@@ -94,7 +94,7 @@ class LeePositionController(ActionFunc):
 
         arm_lengths = rotor_pos_b.norm(dim=-1)
         rotor_angles = torch.atan2(rotor_pos_b[..., 1], rotor_pos_b[..., 0])
-        
+
         def get_template(tensor):
             return tensor.flatten(0, -2)[0]
 
@@ -122,7 +122,7 @@ class LeePositionController(ActionFunc):
             self.mixer = A.T @ (A @ A.T).inverse() @ I
             self.ang_rate_gain = torch.as_tensor(ang_rate_gain) @ I[:3, :3].inverse()
             self.attitute_gain = torch.as_tensor(attitute_gain) @ I[:3, :3].inverse()
-        
+
         self.max_thrusts = get_template(self.rotor.kf_normalized)
         self.mass = get_template(
             self.asset.root_physx_view
@@ -130,11 +130,11 @@ class LeePositionController(ActionFunc):
             .sum(-1, keepdim=True)
             .to(self.device)
         )
-        
+
     @property
     def action_shape(self):
         return torch.Size([*self.asset.shape, self.action_dim])
-    
+
     def apply_action(self, action: torch.Tensor):
         batch_shape = action.shape[:-1]
         action = action.reshape(-1, 4)
@@ -152,27 +152,27 @@ class LeePositionController(ActionFunc):
         )
 
         R = quaternion_to_rotation_matrix(self.asset._data.root_quat_w)
-        
+
         b1_des = torch.cat([
-            torch.cos(target_yaw), 
-            torch.sin(target_yaw), 
+            torch.cos(target_yaw),
+            torch.sin(target_yaw),
             torch.zeros_like(target_yaw)
         ],dim=-1)
 
         b3_des = -normalize(acc)
         b2_des = normalize(torch.cross(b3_des, b1_des, 1))
         R_des = torch.stack([
-            b2_des.cross(b3_des, 1), 
-            b2_des, 
+            b2_des.cross(b3_des, 1),
+            b2_des,
             b3_des
         ], dim=-1)
         ang_error_matrix = 0.5 * (
-            torch.bmm(R_des.transpose(-2, -1), R) 
+            torch.bmm(R_des.transpose(-2, -1), R)
             - torch.bmm(R.transpose(-2, -1), R_des)
         )
         ang_error = torch.stack([
-            ang_error_matrix[:, 2, 1], 
-            ang_error_matrix[:, 0, 2], 
+            ang_error_matrix[:, 2, 1],
+            ang_error_matrix[:, 0, 2],
             ang_error_matrix[:, 1, 0]
         ],dim=-1)
         ang_vel = self.asset._data.root_ang_vel_b
@@ -184,9 +184,20 @@ class LeePositionController(ActionFunc):
         )
         thrust = (-self.mass * (acc * R[:, :, 2]).sum(-1, True))
         ang_acc_thrust = torch.cat([ang_acc, thrust], dim=-1)
-        
+
         target_thrusts = (self.mixer @ ang_acc_thrust.T).T
-        target_throttle = target_thrusts / self.max_thrusts
+        throttle_scale = 1.85
+        # epi 200   throttle_scale 1.84     pos_error   [-0.0316, -0.0599,  0.0133]
+        # epi 200   throttle_scale 1.849    pos_error   [-0.0309, -0.0591,  0.0013]
+        # epi 200   throttle_scale 1.85     pos_error   [-3.0783e-02, -5.9041e-02,  1.1206e-05]
+        # epi 200   throttle_scale 1.851    pos_error   [-0.0307, -0.0589, -0.0013]
+        # epi 200   throttle_scale 1.86     pos_error   [-0.0300, -0.0581, -0.0131]
+
+        # gains*2   thorrle_scale 1.0       pos_error [-0.0154, -0.0484,  1.0415]
+        # gains*4   thorrle_scale 1.0       pos_error [-0.0009, -0.0016,  0.5208]
+        # gains*8   thorrle_scale 1.0       pos_error [-0.0009, -0.0018,  0.2588]
+        target_throttle = (target_thrusts / self.max_thrusts) * throttle_scale
+        # print(f"{throttle_scale=} {pos_error=}")
         return target_throttle
 
     def debug_vis(self):

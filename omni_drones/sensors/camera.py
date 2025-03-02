@@ -1,17 +1,17 @@
 # MIT License
-# 
+#
 # Copyright (c) 2023 Botian Xu, Tsinghua University
-# 
+#
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
 # in the Software without restriction, including without limitation the rights
 # to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
 # copies of the Software, and to permit persons to whom the Software is
 # furnished to do so, subject to the following conditions:
-# 
+#
 # The above copyright notice and this permission notice shall be included in all
 # copies or substantial portions of the Software.
-# 
+#
 # THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 # IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
 # FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
@@ -23,14 +23,14 @@
 
 from typing import Optional, Union, Sequence
 
-import omni.isaac.core.utils.prims as prim_utils
-import omni.isaac.core.utils.stage as stage_utils
+import isaacsim.core.utils.prims as prim_utils
+import isaacsim.core.utils.stage as stage_utils
 import omni.replicator.core as rep
 
 import torch
 import warp as wp
-from omni.isaac.core.prims import XFormPrim
-from omni.isaac.core.simulation_context import SimulationContext
+from isaacsim.core.prims import XFormPrim
+from isaacsim.core.api.simulation_context import SimulationContext
 from pxr import Gf, Sdf, UsdGeom
 from tensordict import TensorDict
 
@@ -71,7 +71,7 @@ class Camera:
         self.annotators = []
 
     def spawn(
-        self, 
+        self,
         prim_paths: Sequence[str],
         translations=None,
         targets=None,
@@ -88,7 +88,7 @@ class Camera:
 
         if not len(translations) == len(prim_paths) == len(targets):
             raise ValueError
-        
+
         for prim_path, translation, target in zip(prim_paths, translations, targets):
             if prim_utils.is_prim_path_valid(prim_path):
                 raise RuntimeError(f"Duplicate prim at {prim_path}.")
@@ -103,14 +103,14 @@ class Camera:
         self.n += n
 
     def initialize(
-        self, 
+        self,
         prim_paths_expr: str = None,
     ):
         if prim_paths_expr is None:
             prim_paths_expr = f"/World/envs/.*/Camera_.*"
 
         prim_paths = prim_utils.find_matching_prim_paths(prim_paths_expr)
-        
+
         for prim_path in prim_paths:
             render_product = rep.create.render_product(
                 prim_path, resolution=self.resolution
@@ -124,12 +124,12 @@ class Camera:
                 annotators[annotator_type] = annotator
 
             self.annotators.append(annotators)
-        
+
         self.count = len(prim_paths)
-    
+
         for _ in range(2):
             self.sim.render()
-        
+
     def get_images(self) -> TensorDict:
         return torch.stack([TensorDict({
             k: wp.to_torch(v.get_data(device=self.device)).permute(2, 0, 1)

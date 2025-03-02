@@ -2,11 +2,11 @@ import torch
 import inspect
 import functools
 
-from omni.isaac.lab.assets import Articulation, ArticulationData, ArticulationCfg
-from omni.isaac.lab.actuators import ActuatorBaseCfg, ActuatorBase
-from omni.isaac.lab.utils import configclass
-from omni.isaac.core.utils.types import ArticulationActions
-import omni.isaac.lab.utils.string as string_utils
+from isaaclab.assets import Articulation, ArticulationData, ArticulationCfg
+from isaaclab.actuators import ActuatorBaseCfg, ActuatorBase
+from isaaclab.utils import configclass
+from isaacsim.core.utils.types import ArticulationActions
+import isaaclab.utils.string as string_utils
 
 from omni_drones.utils.torch import quaternion_to_euler, quat_rotate, quat_rotate_inverse
 
@@ -49,7 +49,7 @@ class Multirotor(Articulation):
     def data(self) -> ArticulationData:
         data = _View(self._data, self.shape)
         return data
-    
+
     @property
     def multirotor_data(self):
         if not hasattr(self, "_multirotor_data"):
@@ -73,7 +73,7 @@ class Multirotor(Articulation):
         super().reset(env_ids)
         for value in self.multirotor_data.throttle.values():
             value[env_ids] = 0
-    
+
     def write_data_to_sim(self):
         """Write external wrenches and joint commands to the simulation.
 
@@ -91,15 +91,15 @@ class Multirotor(Articulation):
                 self.multirotor_data.throttle[name][:] = actuator.throttle
                 self.multirotor_data.applied_thrusts[name][:] = thrusts
                 self.multirotor_data.applied_moments[name][:] = momentum
-                
+
                 thrusts = thrusts.reshape(self.num_instances, len(actuator.body_ids))
                 momentum = momentum.reshape(self.num_instances, len(actuator.body_ids))
-                
+
                 forces_b[..., actuator.body_ids, 2] += thrusts
                 # torques[..., actuator.body_ids, 2] = momentum
                 # mannually aggregate the torques along the z-axis
                 torques_b[..., self.base_id, 2] += momentum.sum(dim=-1, keepdim=True)
-        
+
         # drag_w = (
         #     self.multirotor_data.drag_coef.unsqueeze(-1)
         #     * -self.data.body_lin_vel_w
@@ -116,7 +116,7 @@ class Multirotor(Articulation):
 
         self.set_external_force_and_torque(forces=forces_b, torques=torques_b)
         super().write_data_to_sim()
-    
+
     def _process_actuators_cfg(self):
         print("[INFO] Processing Isaac Articulation Actuators.")
         # collect and remove RotorCfg from `self.cfg.actuators`
@@ -139,8 +139,8 @@ class Multirotor(Articulation):
                 self.multirotor_data.throttle_change[actuator_name] = torch.zeros(actuator.shape, device=self.device)
                 self.multirotor_data.applied_thrusts[actuator_name] = torch.zeros(actuator.shape, device=self.device)
                 self.multirotor_data.applied_moments[actuator_name] = torch.zeros(actuator.shape, device=self.device)
-                
-    def _initialize_impl(self): 
+
+    def _initialize_impl(self):
         super()._initialize_impl()
         self.base_id, self.base_name = self.find_bodies("base_link")
         # self._data.rpy_w = torch.zeros(self.shape + (3,), device=self.device).flatten(0, -2)
@@ -198,7 +198,7 @@ class Rotor(ActuatorBase):
     mapping = torch.square
 
     def __init__(
-        self, 
+        self,
         cfg: "RotorCfg",
         articulation: Multirotor,
     ):
@@ -211,7 +211,7 @@ class Rotor(ActuatorBase):
         self._shape = (*self.asset.shape, len(self.body_ids))
 
         with torch.device(self.device):
-            
+
             def resolve(value_mapping):
                 if not isinstance(value_mapping, Mapping):
                     value_mapping = {name: value_mapping for name in self.body_names}
@@ -219,7 +219,7 @@ class Rotor(ActuatorBase):
                 tensor = torch.as_tensor(values).expand(self.shape).clone()
                 assert tensor.shape == self.shape
                 return tensor
-            
+
             self.throttle = torch.zeros(self.shape, device=self.device)
             self.throttle_target = torch.zeros(self.shape, device=self.device)
 
@@ -229,19 +229,19 @@ class Rotor(ActuatorBase):
             self.rotor_direction = resolve(self.cfg.rotor_direction)
             self.tau_up = resolve(self.cfg.tau_up)
             self.tau_down = resolve(self.cfg.tau_down)
-    
+
     @property
     def device(self):
         return self.asset.device
-    
+
     @property
     def num_rotors(self):
         return len(self.body_ids)
-    
+
     @property
     def shape(self):
         return self._shape
-    
+
     def reset(self, env_ids: Sequence[int]):
         self.throttle[env_ids] = 0
         self.throttle_target[env_ids] = 0
@@ -268,7 +268,7 @@ class RotorCfg(ActuatorBaseCfg):
 
     class_type: type[ActuatorBase] = Rotor
     body_names_expr: list[str] = MISSING
-    
+
     max_rotor_speed: float | Mapping[str, float] = MISSING
     """
     The maximum rotor speed.

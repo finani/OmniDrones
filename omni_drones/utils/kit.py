@@ -8,12 +8,12 @@ import math
 from typing import Optional, Sequence
 
 import carb
-import omni.isaac.core.utils.nucleus as nucleus_utils
-import omni.isaac.core.utils.prims as prim_utils
+import isaacsim.core.utils.nucleus as nucleus_utils
+import isaacsim.core.utils.prims as prim_utils
 import omni.kit
-from omni.isaac.core.materials import PhysicsMaterial
-from omni.isaac.core.prims import GeometryPrim
-from omni.isaac.version import get_version
+from isaacsim.core.api.materials import PhysicsMaterial
+from isaacsim.core.prims import GeometryPrim
+from isaacsim.core.version import get_version
 from pxr import Gf, PhysxSchema, UsdPhysics
 
 
@@ -86,8 +86,8 @@ def create_ground_plane(
             prim_path, predicate=lambda x: prim_utils.get_prim_type_name(x) == "Plane"
         )
     )
-    geom_prim = GeometryPrim(collision_prim_path, disable_stablization=False, collision=True)
-    geom_prim.apply_physics_material(material)
+    geom_prim = GeometryPrim(collision_prim_path, disable_stablization=False)
+    geom_prim.apply_physics_materials(material)
     # Change the color of the plane
     # Warning: This is specific to the default grid plane asset.
     if color is not None:
@@ -100,15 +100,15 @@ def create_ground_plane(
     # Add light source
     # By default, the one from Isaac Sim is too dim for large number of environments.
     # Warning: This is specific to the default grid plane asset.
-    ambient_light = kwargs.get("ambient_light", True)
-    if ambient_light:
-        # check isaacsim version to determine the attribute name
-        attributes = {"intensity": 600.0}
-        isaacsim_version = get_version()
-        if int(isaacsim_version[2]) > 2022:
-            attributes = {f"inputs:{k}": v for k, v in attributes.items()}
-        # create light prim
-        prim_utils.create_prim(f"{prim_path}/AmbientLight", "DistantLight", attributes=attributes)
+    # ambient_light = kwargs.get("ambient_light", True)
+    # if ambient_light:
+    #     # check isaacsim version to determine the attribute name
+    #     attributes = {"intensity": 600.0}
+    #     isaacsim_version = get_version()
+    #     if int(isaacsim_version[2]) > 2022:
+    #         attributes = {f"inputs:{k}": v for k, v in attributes.items()}
+    #     # create light prim
+    #     prim_utils.create_prim(f"{prim_path}/AmbientLight", "DistantLight", attributes=attributes)
 
 
 def move_nested_prims(source_ns: str, target_ns: str):

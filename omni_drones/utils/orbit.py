@@ -1,7 +1,7 @@
 import functools
-import omni.isaac.lab.sim as sim_utils
+import isaaclab.sim as sim_utils
 
-from omni.isaac.lab.sim.spawners.from_files.from_files import (
+from isaaclab.sim.spawners.from_files.from_files import (
     _spawn_from_usd_file, clone
 )
 

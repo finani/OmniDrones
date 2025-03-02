@@ -10,15 +10,15 @@ from tensordict import TensorDict
 def main(cfg):
     app = init_simulation_app(cfg)
 
-    # due to the design of Isaac Sim, these imports are only available 
+    # due to the design of Isaac Sim, these imports are only available
     # after the SimulationApp instance is created
     from omni_drones.envs.isaac_env import IsaacEnv
     from omni_drones.robots.assets import Multirotor, HUMMINGBIRD_CFG
 
-    from omni.isaac.lab.scene import InteractiveSceneCfg
-    from omni.isaac.lab.assets import AssetBaseCfg
-    from omni.isaac.lab.terrains import TerrainImporterCfg
-    import omni.isaac.lab.sim as sim_utils
+    from isaaclab.scene import InteractiveSceneCfg
+    from isaaclab.assets import AssetBaseCfg
+    from isaaclab.terrains import TerrainImporterCfg
+    import isaaclab.sim as sim_utils
 
     class MyEnv(IsaacEnv):
 
@@ -51,12 +51,12 @@ def main(cfg):
                     prim_path="/World/skyLight",
                     spawn=sim_utils.DomeLightCfg(color=(0.13, 0.13, 0.13), intensity=1000.0),
                 )
-                
+
                 # this time, we spawn two drones by providing a list of `prim_paths`
                 # note that they should **share the same path prefix**
                 drone = HUMMINGBIRD_CFG.replace(
                     prim_path=[
-                        "{ENV_REGEX_NS}/Robot_0", 
+                        "{ENV_REGEX_NS}/Robot_0",
                         "{ENV_REGEX_NS}/Robot_1",
                         "{ENV_REGEX_NS}/TheThridDrone", # this works
                         # "{ENV_REGEX_NS}/Something/Robot_2", # this will not work
@@ -70,31 +70,33 @@ def main(cfg):
             # the environment offset is added to the initial state
             init_state = self.default_init_state[env_ids]
             init_state[:, :, :3] += self.scene.env_origins[env_ids].unsqueeze(1)
-            
+
             # note the difference to the single drone case, where we used
             #   init_state = self.default_init_state[env_ids]
             #   init_state[:, :3] += self.scene.env_origins[env_ids]
 
             # add some offset to the y position to prevent collision
             init_state[:, :, 1] += torch.arange(self.drone.shape[1], device=self.device) * 0.5
-            
+
             env_ids = self.drone.resolve_ids(env_ids)
             self.drone.write_root_state_to_sim(init_state.flatten(0, 1), env_ids)
-    
+
     env = MyEnv(cfg)
 
     # a simple policy that takes random actions
     def policy(tensordict: TensorDict):
         tensordict.update(env.full_action_spec.rand())
         return tensordict
-    
+
     tensordict = env.reset()
 
-    while True:
+    while app.is_running():
         tensordict = policy(tensordict)
         # torchrl automatically handles stepping and reset for us
         _, tensordict = env.step_and_maybe_reset(tensordict)
 
-    
+    app.close()
+
+
 if __name__ == "__main__":
     main()

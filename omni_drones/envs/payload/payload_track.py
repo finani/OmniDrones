@@ -1,17 +1,17 @@
 # MIT License
-# 
+#
 # Copyright (c) 2023 Botian Xu, Tsinghua University
-# 
+#
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
 # in the Software without restriction, including without limitation the rights
 # to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
 # copies of the Software, and to permit persons to whom the Software is
 # furnished to do so, subject to the following conditions:
-# 
+#
 # The above copyright notice and this permission notice shall be included in all
 # copies or substantial portions of the Software.
-# 
+#
 # THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 # IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
 # FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
@@ -40,8 +40,8 @@ class PayloadTrack(IsaacEnv):
 
     ## Observation
     - `drone_payload_rpos` (3): The position of the drone relative to the payload's position.
-    - `root_state` (16 + `num_rotors`): The basic information of the drone (except its position), 
-      containing its rotation (in quaternion), velocities (linear and angular), 
+    - `root_state` (16 + `num_rotors`): The basic information of the drone (except its position),
+      containing its rotation (in quaternion), velocities (linear and angular),
       heading and up vectors, and the current throttle.
     - `target_payload_rpos` (3 * `future_traj_steps`): The position of the reference relative to the payload's position.
     - `payload_vel` (6): The payload's linear and angular velocities.
@@ -56,7 +56,7 @@ class PayloadTrack(IsaacEnv):
       energy consumption.
     - `spin`: Reward computed from the spin of the drone to discourage spinning.
     - `action_smoothness`: Reward that encourages smoother drone actions, computed based on the throttle difference of the drone.
-    
+
     The total reward is computed as follows:
     ```{math}
         r = r_\text{pos} + r_\text{pos} * (r_\text{up} + r_\text{spin}) + r_\text{effort} + r_\text{action_smoothness}
@@ -64,10 +64,10 @@ class PayloadTrack(IsaacEnv):
 
     ## Episode End
 
-    The episode ends when the drone gets too close to the ground, or when 
-    the distance between the payload and the target exceeds a threshold, 
+    The episode ends when the drone gets too close to the ground, or when
+    the distance between the payload and the target exceeds a threshold,
     or when the maximum episode length is reached.
-    
+
 
     ## Config
 
@@ -91,7 +91,7 @@ class PayloadTrack(IsaacEnv):
         self.init_root_state = self.drone.data.default_root_state.clone()
         self.init_joint_pos = self.drone.data.default_joint_pos.clone()
         self.init_joint_vel = self.drone.data.default_joint_vel.clone()
-        
+
         self.init_rpy_dist = D.Uniform(
             torch.tensor([-.1, -.1, 0.], device=self.device) * torch.pi,
             torch.tensor([0.1, 0.1, 2.], device=self.device) * torch.pi
@@ -125,14 +125,14 @@ class PayloadTrack(IsaacEnv):
         self.target_pos = self.waypoints[:, 0]
 
     def _design_scene(self):
-        from omni.isaac.lab.scene import InteractiveSceneCfg
-        from omni.isaac.lab.assets import AssetBaseCfg
-        from omni.isaac.lab.terrains import TerrainImporterCfg
+        from isaaclab.scene import InteractiveSceneCfg
+        from isaaclab.assets import AssetBaseCfg
+        from isaaclab.terrains import TerrainImporterCfg
 
-        import omni.isaac.lab.sim as sim_utils
-        
+        import isaaclab.sim as sim_utils
+
         from omni_drones.robots.assets import HUMMINGBIRD_CFG
-        
+
         class SceneCfg(InteractiveSceneCfg):
 
             terrain = TerrainImporterCfg(
@@ -140,7 +140,7 @@ class PayloadTrack(IsaacEnv):
                 terrain_type="plane",
                 collision_group=-1,
             )
-            
+
             # lights
             light = AssetBaseCfg(
                 prim_path="/World/light",
@@ -150,13 +150,13 @@ class PayloadTrack(IsaacEnv):
                 prim_path="/World/skyLight",
                 spawn=sim_utils.DomeLightCfg(color=(0.13, 0.13, 0.13), intensity=1000.0),
             )
-            
+
             drone = HUMMINGBIRD_CFG
             drone.prim_path="{ENV_REGEX_NS}/Robot_0"
             drone.spawn.func = spawn_with_payload
 
         return SceneCfg(num_envs=self.cfg.num_envs, env_spacing=2.5)
-    
+
     def _reset_idx(self, env_ids: torch.Tensor):
         self.traj_manager.c[env_ids] = self.traj_c_dist.sample(env_ids.shape)
         self.traj_manager.rot[env_ids] = euler_to_quaternion(self.traj_rpy_dist.sample(env_ids.shape))
@@ -165,22 +165,22 @@ class PayloadTrack(IsaacEnv):
         self.traj_manager.w[env_ids] = torch.randn_like(traj_w).sign() * traj_w
 
         pos_t0 = self.traj_manager.compute(
-            torch.zeros(env_ids.shape, device=self.device), 
+            torch.zeros(env_ids.shape, device=self.device),
             dt=0,
             ids=env_ids
         ).reshape(-1, 3)
 
         init_root_state = self.init_root_state[env_ids]
         init_root_state[..., :3] = (
-            pos_t0 
-            + self.scene.env_origins[env_ids] 
+            pos_t0
+            + self.scene.env_origins[env_ids]
             + torch.tensor([0., 0., 0.8], device=self.device)
         )
 
         self.drone.write_root_state_to_sim(init_root_state, env_ids)
         self.drone.write_joint_state_to_sim(
-            self.init_joint_pos[env_ids], 
-            self.init_joint_vel[env_ids], 
+            self.init_joint_pos[env_ids],
+            self.init_joint_vel[env_ids],
             env_ids=env_ids
         )
 
@@ -197,7 +197,7 @@ class PayloadTrack(IsaacEnv):
 
     def update(self):
         self.waypoints[:] = self.traj_manager.compute(
-            self.progress_buf * self.step_dt, 
+            self.progress_buf * self.step_dt,
             dt=self.step_dt * 5,
             steps=self.future_traj_steps,
         )
@@ -207,7 +207,7 @@ class PayloadTrack(IsaacEnv):
             self.debug_draw.plot(self.traj_vis[i])
             self.debug_draw.plot(
                 self.waypoints[i] + self.scene.env_origins[i].unsqueeze(0),
-                size=4, 
+                size=4,
                 color=(0, 1, 0, 1)
             )
         payload_pos = self.drone.data.body_pos_w[:, self.payload_id]
@@ -218,7 +218,7 @@ class PayloadTrack(IsaacEnv):
 
 
     class Waypoints(mdp.ObservationFunc):
-        
+
         def __init__(self, env: IsaacEnv):
             super().__init__(env)
             self.drone: Multirotor = self.env.scene["drone"]
@@ -259,7 +259,7 @@ class PayloadTrack(IsaacEnv):
         def __init__(self, env: IsaacEnv, weight: float = 1):
             super().__init__(env, weight)
             self.drone: Multirotor = self.env.scene["drone"]
-        
+
         def compute(self) -> torch.Tensor:
             dot = (
                 self.drone.data.heading_w_vec[:, :2]
@@ -271,7 +271,7 @@ class PayloadTrack(IsaacEnv):
         def __init__(self, env, weight: float = 1.):
             super().__init__(env, weight)
             self.drone: Multirotor = self.env.scene["drone"]
-        
+
         def compute(self) -> torch.Tensor:
             spin = torch.square(self.drone.data.root_ang_vel_b[..., [2]])
             return 1.0 / (1.0 + torch.square(spin))
@@ -291,7 +291,7 @@ class PayloadTrack(IsaacEnv):
         def compute(self) -> torch.Tensor:
             pos_diff = (
                 self.robot.data.body_pos_w[:, self.body_id]
-                - self.env.scene.env_origins 
+                - self.env.scene.env_origins
                 - self.env.target_pos
             )
             pos_error = pos_diff.norm(dim=-1, keepdim=True)
@@ -299,11 +299,11 @@ class PayloadTrack(IsaacEnv):
             return terminated
 
 
-import omni.isaac.core.utils.prims as prim_utils
+import isaacsim.core.utils.prims as prim_utils
 import omni.physx.scripts.utils as script_utils
-import omni.isaac.core.objects as objects
+import isaacsim.core.api.objects as objects
 import omni_drones.utils.kit as kit_utils
-from omni.isaac.lab.sim.spawners.from_files.from_files_cfg import UsdFileCfg
+from isaaclab.sim.spawners.from_files.from_files_cfg import UsdFileCfg
 from omni_drones.utils.orbit import _spawn_from_usd_file, clone, multi
 from pxr import Usd, UsdPhysics
 

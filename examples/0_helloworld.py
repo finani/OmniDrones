@@ -1,6 +1,7 @@
 import hydra
 import os
 import torch
+from tqdm import trange
 
 from omni_drones import init_simulation_app
 from tensordict import TensorDict
@@ -10,18 +11,17 @@ from tensordict import TensorDict
 def main(cfg):
     app = init_simulation_app(cfg)
 
-    # due to the design of Isaac Sim, these imports are only available 
+    # due to the design of Isaac Sim, these imports are only available
     # after the SimulationApp instance is created
     from omni_drones.envs.isaac_env import IsaacEnv
     from omni_drones.robots.assets import Multirotor, FIREFLY_CFG
 
-    from omni.isaac.lab.scene import InteractiveSceneCfg
-    from omni.isaac.lab.assets import AssetBaseCfg
-    from omni.isaac.lab.terrains import TerrainImporterCfg
-    import omni.isaac.lab.sim as sim_utils
+    from isaaclab.scene import InteractiveSceneCfg
+    from isaaclab.assets import AssetBaseCfg
+    from isaaclab.terrains import TerrainImporterCfg
+    import isaaclab.sim as sim_utils
 
     class MyEnv(IsaacEnv):
-
         def __init__(self, cfg):
             super().__init__(cfg)
             # the `__init__` method invokes `_design_scene` to create the scene
@@ -50,7 +50,7 @@ def main(cfg):
                     prim_path="/World/skyLight",
                     spawn=sim_utils.DomeLightCfg(color=(0.13, 0.13, 0.13), intensity=1000.0),
                 )
-                
+
                 drone = FIREFLY_CFG.replace(
                     prim_path="{ENV_REGEX_NS}/Robot",
                 )
@@ -64,22 +64,28 @@ def main(cfg):
             init_state[:, :3] += self.scene.env_origins[env_ids]
 
             self.drone.write_root_state_to_sim(init_state, env_ids)
-    
+
     env = MyEnv(cfg)
 
     # a simple policy that takes random actions
     def policy(tensordict: TensorDict):
         tensordict.update(env.full_action_spec.rand())
+        # print(f"{tensordict['agents', 'action']=}")
         return tensordict
-    
-    tensordict = env.reset()
 
-    while True:
+    def rollout(env: IsaacEnv):
+        data_ = env.reset()
+        result = []
+        for _ in trange(env.max_episode_length):
+            data_ = policy(data_)
+            data, data_ = env.step_and_maybe_reset(data_)
+            result.append(data)
+        return torch.stack(result)
 
-        tensordict = policy(tensordict)
-        # torchrl automatically handles stepping and reset for us
-        _, tensordict = env.step_and_maybe_reset(tensordict)
+    while app.is_running():
+        rollout(env)
+    app.close()
 
-    
+
 if __name__ == "__main__":
     main()

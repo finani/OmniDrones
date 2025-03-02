@@ -1,0 +1,53 @@
+[build-system]
+requires = ["setuptools >= 61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "omni_drones"
+version = "0.2.0"
+description = "OmniDrones is an open-source platform designed for reinforcement learning research on multi-rotor drone systems."
+authors = [
+  {name = "Botian Xu", email = "btx0424@outlook.com"},
+  {name = "Inhwan Wee", email = "inhwan.wee@gmail.com"},
+]
+
+readme = "README.md"
+keywords = ["robotics", "rl", "drone", "uav"]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "License :: OSI Approved :: MIT License",
+  "Intended Audience :: Developers",
+  "Topic :: Software Development :: Build Tools",
+  "Programming Language :: Python :: 3.10",
+]
+
+requires-python = ">=3.10"
+dependencies = [
+    "hydra-core",
+    "omegaconf",
+    "wandb",
+    "imageio",
+    "plotly",
+    "einops",
+    "pandas",
+    "scikit-image",
+    "moviepy",
+    "av",
+    "torchrl==0.6.0",
+    "tensordict==0.6.2",
+]
+
+[project.optional-dependencies]
+docs = [
+    "sphinx-book-theme",
+    "myst-parser",
+    "sphinx-design",
+    "sphinx-copybutton",
+]
+
+[project.urls]
+Homepage = "https://github.com/btx0424/OmniDrones"
+Documentation = "https://omnidrones.readthedocs.io/en/latest"
+
+[tool.setuptools.packages.find]
+exclude = ["examples*", "scripts*"]

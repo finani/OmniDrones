@@ -1,17 +1,17 @@
 # MIT License
-# 
+#
 # Copyright (c) 2023 Botian Xu, Tsinghua University
-# 
+#
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
 # in the Software without restriction, including without limitation the rights
 # to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
 # copies of the Software, and to permit persons to whom the Software is
 # furnished to do so, subject to the following conditions:
-# 
+#
 # The above copyright notice and this permission notice shall be included in all
 # copies or substantial portions of the Software.
-# 
+#
 # THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 # IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
 # FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
@@ -21,10 +21,10 @@
 # SOFTWARE.
 
 
-import omni.isaac.core.utils.torch as torch_utils
+import isaacsim.core.utils.torch as torch_utils
 import omni_drones.utils.kit as kit_utils
 from omni_drones.utils.torch import euler_to_quaternion, normalize, quat_rotate_inverse, quat_rotate
-import omni.isaac.core.utils.prims as prim_utils
+import isaacsim.core.utils.prims as prim_utils
 import torch
 import torch.distributions as D
 
@@ -37,15 +37,15 @@ from tensordict.tensordict import TensorDict, TensorDictBase
 
 class Track(IsaacEnv):
     r"""
-    A basic control task. The goal for the agent is to track a reference 
+    A basic control task. The goal for the agent is to track a reference
     lemniscate trajectory in the 3D space.
 
     ## Observation
-    
-    - `rpos` (3 * `future_traj_steps`): The relative position of the drone to the 
+
+    - `rpos` (3 * `future_traj_steps`): The relative position of the drone to the
       reference positions in the future `future_traj_steps` time steps.
-    - `root_state` (16 + `num_rotors`): The basic information of the drone (except its position), 
-      containing its rotation (in quaternion), velocities (linear and angular), 
+    - `root_state` (16 + `num_rotors`): The basic information of the drone (except its position),
+      containing its rotation (in quaternion), velocities (linear and angular),
       heading and up vectors, and the current throttle.
     - `time_encoding` (optional): The time encoding, which is a 4-dimensional
       vector encoding the current progress of the episode.
@@ -69,7 +69,7 @@ class Track(IsaacEnv):
     ## Episode End
 
     The episode ends when the tracking error is larger than `reset_thres`, or
-    when the drone is too close to the ground, or when the episode reaches 
+    when the drone is too close to the ground, or when the episode reaches
     the maximum length.
 
     ## Config
@@ -126,7 +126,7 @@ class Track(IsaacEnv):
             torch.tensor(0.8, device=self.device),
             torch.tensor(1.1, device=self.device)
         )
-        
+
         self.traj_manager = LemniscateTrajectory((self.num_envs,), self.device)
         self.traj_vis = torch.zeros(self.num_envs, self.max_episode_length, 3, device=self.device)
 
@@ -136,14 +136,14 @@ class Track(IsaacEnv):
         self.resolve_specs()
 
     def _design_scene(self):
-        from omni.isaac.lab.scene import InteractiveSceneCfg
-        from omni.isaac.lab.assets import AssetBaseCfg
-        from omni.isaac.lab.terrains import TerrainImporterCfg
+        from isaaclab.scene import InteractiveSceneCfg
+        from isaaclab.assets import AssetBaseCfg
+        from isaaclab.terrains import TerrainImporterCfg
 
-        import omni.isaac.lab.sim as sim_utils
-        
+        import isaaclab.sim as sim_utils
+
         from omni_drones.robots.assets import HUMMINGBIRD_CFG, FIREFLY_CFG
-        
+
         class SceneCfg(InteractiveSceneCfg):
 
             terrain = TerrainImporterCfg(
@@ -151,7 +151,7 @@ class Track(IsaacEnv):
                 terrain_type="plane",
                 collision_group=-1,
             )
-            
+
             # lights
             light = AssetBaseCfg(
                 prim_path="/World/light",
@@ -161,7 +161,7 @@ class Track(IsaacEnv):
                 prim_path="/World/skyLight",
                 spawn=sim_utils.DomeLightCfg(color=(0.13, 0.13, 0.13), intensity=1000.0),
             )
-            
+
             drone = HUMMINGBIRD_CFG
             drone.prim_path="{ENV_REGEX_NS}/Robot_0"
 
@@ -175,21 +175,21 @@ class Track(IsaacEnv):
         self.traj_manager.w[env_ids] = torch.randn_like(traj_w).sign() * traj_w
 
         pos_t0 = self.traj_manager.compute(
-            torch.zeros(env_ids.shape, device=self.device), 
+            torch.zeros(env_ids.shape, device=self.device),
             dt=0,
             ids=env_ids
         ).reshape(-1, 3)
 
         init_root_state = self.init_root_state[env_ids]
         init_root_state[..., :3] = (
-            pos_t0 
-            + self.scene.env_origins[env_ids] 
+            pos_t0
+            + self.scene.env_origins[env_ids]
         )
 
         self.drone.write_root_state_to_sim(init_root_state, env_ids)
         self.drone.write_joint_state_to_sim(
-            self.init_joint_pos[env_ids], 
-            self.init_joint_vel[env_ids], 
+            self.init_joint_pos[env_ids],
+            self.init_joint_vel[env_ids],
             env_ids=env_ids
         )
 
@@ -206,18 +206,18 @@ class Track(IsaacEnv):
 
     def _update_common(self):
         self.waypoints[:] = self.traj_manager.compute(
-            self.progress_buf * self.step_dt, 
+            self.progress_buf * self.step_dt,
             dt=self.step_dt * 5,
             steps=self.future_traj_steps,
         )
         self.target_heading_vec[:] = normalize(self.waypoints[:, 1] - self.waypoints[:, 0])
-    
+
     def debug_vis(self):
         i = self.num_envs // 2
         self.debug_draw.plot(self.traj_vis[i])
         self.debug_draw.plot(
             self.waypoints[i] + self.scene.env_origins[i].unsqueeze(0),
-            size=4, 
+            size=4,
             color=(0, 1, 0, 1)
         )
         # self.debug_draw.vector(
@@ -225,7 +225,7 @@ class Track(IsaacEnv):
         #     self.drone.data.heading_w_vec * 0.5,
         #     color=(1, 0, 0, 1)
         # )
-    
+
     def _compute_observation(self):
         obs = TensorDict({}, [self.num_envs])
         waypoint_pos = - (
@@ -241,9 +241,9 @@ class Track(IsaacEnv):
             waypoint_pos.reshape(self.num_envs, -1)
         ], dim=-1)
         return obs
-    
+
     class Waypoints(mdp.ObservationFunc):
-        
+
         def __init__(self, env: "Track"):
             super().__init__(env)
             self.drone: Multirotor = self.env.scene["drone"]
@@ -261,7 +261,7 @@ class Track(IsaacEnv):
                 pos
             )
             return pos.reshape(self.num_envs, -1)
-    
+
     class PosTrackingErrorExp(mdp.RewardFunc):
         def __init__(self, env, scale: float, weight: float = 1.):
             super().__init__(env, weight)
@@ -276,12 +276,12 @@ class Track(IsaacEnv):
             )
             error = torch.norm(error, dim=-1, keepdim=True)
             return torch.exp(- self.scale * error)
-    
+
     class YawTrackingDot(mdp.RewardFunc):
         def __init__(self, env: IsaacEnv, weight: float = 1):
             super().__init__(env, weight)
             self.drone: Multirotor = self.env.scene["drone"]
-        
+
         def compute(self) -> torch.Tensor:
             heading_w_vec = quat_rotate(
                 self.drone.data.root_quat_w,
@@ -292,7 +292,7 @@ class Track(IsaacEnv):
                 * normalize(self.drone.data.root_lin_vel_w[:, :2])
             ).sum(-1, True)
             return dot
-    
+
     class TrackingErrorExceeds(mdp.TerminationFunc):
         def __init__(
             self,
@@ -306,7 +306,7 @@ class Track(IsaacEnv):
         def compute(self) -> torch.Tensor:
             pos_diff = (
                 self.robot.data.root_pos_w
-                - self.env.scene.env_origins 
+                - self.env.scene.env_origins
                 - self.env.target_pos
             )
             pos_error = pos_diff.norm(dim=-1, keepdim=True)

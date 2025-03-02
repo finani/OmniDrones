@@ -1,7 +1,7 @@
 from omni_drones.robots.multirotor import Multirotor, RotorCfg
 from omni_drones.utils.orbit import DEFAULT_CFG
-from omni.isaac.lab.assets import ArticulationCfg
-import omni.isaac.lab.sim as sim_utils
+from isaaclab.assets import ArticulationCfg
+import isaaclab.sim as sim_utils
 
 import os.path as osp
 

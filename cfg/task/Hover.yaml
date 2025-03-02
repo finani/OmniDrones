@@ -5,8 +5,11 @@ defaults:
   - /base/env_base@_here_
   - /base/sim_base@_here_
 
-env:
-  num_envs: 4096
+num_envs: 4
+max_episode_length: 500
+
+# env:
+#   num_envs: 4096
 
 drone_model: Firefly
 force_sensor: false

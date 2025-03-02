@@ -15,10 +15,10 @@ def main(cfg):
     simulation_app = init_simulation_app(cfg)
     print(OmegaConf.to_yaml(cfg))
 
-    import omni.isaac.core.objects as objects
-    import omni.isaac.core.utils.prims as prim_utils
+    import isaacsim.core.api.objects as objects
+    import isaacsim.core.utils.prims as prim_utils
     import omni_drones.utils.scene as scene_utils
-    from omni.isaac.core.simulation_context import SimulationContext
+    from isaacsim.core.api.simulation_context import SimulationContext
     from omni_drones.robots.assembly.transportation_group import TransportationGroup
     from omni_drones.robots.drone import MultirotorBase
 
@@ -45,6 +45,7 @@ def main(cfg):
     group.initialize()
     init_poses = group.get_world_poses(True)
     init_joint_pos = group.get_joint_positions(True)
+
     init_drone_poses = drone.get_world_poses(True)
 
     print(init_drone_poses[0])
@@ -90,10 +91,10 @@ if __name__ == "__main__":
 
 """
 
-from omni.isaac.core.articulations import ArticulationView
-from omni.isaac.core.prims import RigidPrimView
+from isaacsim.core.prims import Articulation
+from isaacsim.core.prims import RigidPrim as RigidPrimView
 
-a = ArticulationView("/World/envs/env_0/TransportationGroup_0")
+a = Articulation("/World/envs/env_0/TransportationGroup_0")
 a.initialize()
 
 d = RigidPrimView("/World/envs/env_0/TransportationGroup_0/unit_*/firefly/base_link")

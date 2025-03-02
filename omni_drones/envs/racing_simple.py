@@ -5,12 +5,12 @@ import os
 import yaml
 
 from tensordict import TensorDict
-from omni.isaac.lab.scene import InteractiveSceneCfg
-from omni.isaac.lab.assets import AssetBaseCfg, RigidObjectCfg, RigidObject
-from omni.isaac.lab.sensors import ContactSensorCfg, ContactSensor
-from omni.isaac.lab.terrains import TerrainImporterCfg
-from omni.isaac.lab.utils.math import quat_from_angle_axis, quat_rotate_inverse, quat_rotate, quat_from_euler_xyz
-import omni.isaac.lab.sim as sim_utils
+from isaaclab.scene import InteractiveSceneCfg
+from isaaclab.assets import AssetBaseCfg, RigidObjectCfg, RigidObject
+from isaaclab.sensors import ContactSensorCfg, ContactSensor
+from isaaclab.terrains import TerrainImporterCfg
+from isaaclab.utils.math import quat_from_angle_axis, quat_rotate_inverse, quat_rotate, quat_from_euler_xyz
+import isaaclab.sim as sim_utils
 
 from omni_drones.envs import IsaacEnv, mdp
 from omni_drones.robots.assets import Multirotor, FIREFLY_CFG, HUMMINGBIRD_CFG
@@ -50,38 +50,38 @@ class RacingSimple(IsaacEnv):
         self.gate: RigidObject = self.scene["gate"]
         self.num_gates = self.gate.num_instances
         root_pose = self.gate.data.root_state_w.clone()
-        
+
         track_cfg_path = os.path.join(omni_drones.__path__[0], "data", "UZH_track.yaml")
         with open(track_cfg_path, "r") as f:
             gate_cfg = yaml.safe_load(f)["gates"]
         gate_pos_w = torch.as_tensor([gate["pos"] for gate in gate_cfg]) * 0.6
         gate_rpy_w = torch.as_tensor([gate["ori"] for gate in gate_cfg]) / 180. * torch.pi
-        
+
         root_pose[:, :3] = gate_pos_w
         root_pose[:, 3:7] = quat_from_euler_xyz(*gate_rpy_w.unbind(-1))
-        
+
         # root_pose[:, 2] += 2.0 + 1.5 * torch.rand(len(root_pose), device=self.device)
-        
+
         # theta = torch.linspace(0, torch.pi * 2, self.num_gates + 1)[:-1]
         # root_pose[:, 0] = 3.6 * torch.cos(theta)
         # root_pose[:, 1] = 3.6 * torch.sin(theta)
         # root_pose[:, 3:7] = quat_from_angle_axis(theta - torch.pi/2, torch.tensor([0., 0., 1.]).expand(len(theta), 3))
-        from omni.isaac.lab.markers import VisualizationMarkers, GREEN_ARROW_X_MARKER_CFG
+        from isaaclab.markers import VisualizationMarkers, GREEN_ARROW_X_MARKER_CFG
         self.arrows = VisualizationMarkers(GREEN_ARROW_X_MARKER_CFG.replace(prim_path="/Visuals/Command/direction"))
         self.arrows.set_visibility(True)
         self.arrows.visualize(root_pose[:, :3], root_pose[:, 3:7])
-        
+
         self.gate.write_root_state_to_sim(root_pose)
         self.gate_vec = - quat_rotate(
             self.gate.data.root_quat_w,
             torch.tensor([1., 0., 0.], device=self.device).expand(self.num_gates, 3)
         )
         self.passed = torch.zeros(self.num_envs, dtype=bool, device=self.device)
-        
+
         self.gate_idx = torch.zeros(self.num_envs, dtype=int, device=self.device)
         self.curr_gate_distance = torch.zeros(self.num_envs, 1, device=self.device)
         self.resolve_specs()
-    
+
     def _design_scene(self):
         # the scene is created from a SceneCfg object in a declarative way
         # see the docstring of `InteractiveSceneCfg` for more details
@@ -100,7 +100,7 @@ class RacingSimple(IsaacEnv):
                 prim_path="/World/skyLight",
                 spawn=sim_utils.DomeLightCfg(color=(0.13, 0.13, 0.13), intensity=1000.0),
             )
-            
+
             drone = HUMMINGBIRD_CFG.replace(
                 prim_path="{ENV_REGEX_NS}/Robot",
             )
@@ -139,11 +139,11 @@ class RacingSimple(IsaacEnv):
 
         self.gate_idx[env_ids] = gate_idx
         self.passed[env_ids] = False
-    
+
     def _update_common(self):
         drone_pos_w = self.drone.data.root_pos_w
         drone_quat_w = self.drone.data.root_quat_w
-        
+
         self.curr_gate_pos_w = self.gate.data.root_pos_w[self.gate_idx]
         self.next_gate_pos_w = self.gate.data.root_pos_w[(self.gate_idx + 1) % self.num_gates]
         self.last_gate_pos_w = self.gate.data.root_pos_w[(self.gate_idx - 1) % self.num_gates]
@@ -195,12 +195,12 @@ class RacingSimple(IsaacEnv):
             self.next_gate_pos_b,
         ], dim=-1)
         return observation
-    
+
     class progress(mdp.RewardFunc):
         env: "RacingSimple"
         def compute(self):
             return self.env.racing_progress + self.env.pass_through_legal_.unsqueeze(1) * 30.
-    
+
     class reach(mdp.RewardFunc):
         env: "RacingSimple"
         def compute(self):
@@ -208,13 +208,13 @@ class RacingSimple(IsaacEnv):
             target = self.env.curr_gate_pos_w - self.env.curr_gate_vec_w * 0.2
             distance = (self.env.drone.data.root_pos_w[:, :3] - target).square().sum(-1, True)
             return torch.exp(- distance / 0.5)
-    
+
     class forward(mdp.RewardFunc):
         env: "RacingSimple"
         def compute(self):
             direction = F.normalize(self.env.curr_gate_pos_b[:, :2], dim=-1)
             return -direction[:, 0].unsqueeze(-1)
-    
+
     class align(mdp.RewardFunc):
         env: "RacingSimple"
         def compute(self):
@@ -226,12 +226,12 @@ class RacingSimple(IsaacEnv):
         env: "RacingSimple"
         def compute(self):
             return - self.env.drone.data.projected_gravity_b[:, :2].square().sum(-1, True)
-    
+
     class spin(mdp.RewardFunc):
         env: "RacingSimple"
         def compute(self):
             return - self.env.drone.data.root_ang_vel_w.square().sum(-1, True)
-        
+
     class smoothness(mdp.RewardFunc):
         env: "RacingSimple"
         def compute(self):
@@ -240,7 +240,7 @@ class RacingSimple(IsaacEnv):
     class survival(mdp.RewardFunc):
         def compute(self):
             return torch.ones(self.env.num_envs, 1, device=self.env.device)
-    
+
     class height_exceeds_range(mdp.TerminationFunc):
         env: "RacingSimple"
         def __init__(self, env: "RacingSimple", range):
@@ -249,10 +249,10 @@ class RacingSimple(IsaacEnv):
 
         def compute(self):
             return (
-                (self.env.drone.data.root_pos_w[:, 2] < self.range[0]) | 
+                (self.env.drone.data.root_pos_w[:, 2] < self.range[0]) |
                 (self.env.drone.data.root_pos_w[:, 2] > self.range[1])
             ).unsqueeze(-1)
-    
+
     class pass_through_illegal(mdp.TerminationFunc):
         env: "RacingSimple"
         def compute(self):
@@ -271,7 +271,7 @@ class RacingSimple(IsaacEnv):
         env: "RacingSimple"
         def compute(self):
             return self.env.contact.data.net_forces_w.norm(dim=-1).any(dim=1, keepdim=True)
-            
+
 
     def debug_vis(self):
         self.debug_draw.vector(

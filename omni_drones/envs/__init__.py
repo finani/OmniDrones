@@ -1,17 +1,17 @@
 # MIT License
-# 
+#
 # Copyright (c) 2023 Botian Xu, Tsinghua University
-# 
+#
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
 # in the Software without restriction, including without limitation the rights
 # to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
 # copies of the Software, and to permit persons to whom the Software is
 # furnished to do so, subject to the following conditions:
-# 
+#
 # The above copyright notice and this permission notice shall be included in all
 # copies or substantial portions of the Software.
-# 
+#
 # THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 # IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
 # FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
@@ -40,7 +40,7 @@ except ModuleNotFoundError:
         "please install Isaac lab (https://github.com/NVIDIA-Omniverse/lab)."
     )
 
-from omni.isaac.lab.scene.interactive_scene import *
+from isaaclab.scene.interactive_scene import *
 
 
 def _add_entities_from_cfg(self):
@@ -96,7 +96,7 @@ def _add_entities_from_cfg(self):
                 )
             # store xform prim view corresponding to this asset
             # all prims in the scene are Xform prims (i.e. have a transform component)
-            self._extras[asset_name] = XFormPrimView(asset_cfg.prim_path, reset_xform_properties=False)
+            self._extras[asset_name] = XFormPrim(asset_cfg.prim_path, reset_xform_properties=False)
         else:
             raise ValueError(f"Unknown asset config type for {asset_name}: {asset_cfg}")
         # store global collision paths

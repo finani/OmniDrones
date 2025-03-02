@@ -1,7 +1,7 @@
 import hydra
 import os
 import torch
-from omegaconf import OmegaConf
+from tqdm import trange
 
 from omni_drones import init_simulation_app
 from tensordict import TensorDict
@@ -11,15 +11,15 @@ from tensordict import TensorDict
 def main(cfg):
     app = init_simulation_app(cfg)
 
-    # due to the design of Isaac Sim, these imports are only available 
+    # due to the design of Isaac Sim, these imports are only available
     # after the SimulationApp instance is created
     from omni_drones.envs.isaac_env import IsaacEnv
     from omni_drones.robots.assets import Multirotor, HUMMINGBIRD_CFG
 
-    from omni.isaac.lab.scene import InteractiveSceneCfg
-    from omni.isaac.lab.assets import AssetBaseCfg
-    from omni.isaac.lab.terrains import TerrainImporterCfg
-    import omni.isaac.lab.sim as sim_utils
+    from isaaclab.scene import InteractiveSceneCfg
+    from isaaclab.assets import AssetBaseCfg
+    from isaaclab.terrains import TerrainImporterCfg
+    import isaaclab.sim as sim_utils
 
     class MyEnv(IsaacEnv):
 
@@ -47,13 +47,13 @@ def main(cfg):
             self.target_pos[:, 2] += 1.0
 
         def _design_scene(self):
-            import omni.isaac.core.utils.prims as prim_utils
+            import isaacsim.core.utils.prims as prim_utils
             import omni.physx.scripts.utils as script_utils
-            import omni.isaac.core.objects as objects
+            import isaacsim.core.api.objects as objects
             import omni_drones.utils.kit as kit_utils
-            from omni.isaac.lab.sim.spawners.from_files.from_files_cfg import UsdFileCfg
+            from isaaclab.sim.spawners.from_files.from_files_cfg import UsdFileCfg
             from omni_drones.utils.orbit import _spawn_from_usd_file, clone, multi
-            
+
             from pxr import Usd, UsdPhysics
 
             BAR_LENGTH = 0.8
@@ -104,10 +104,10 @@ def main(cfg):
                     prim_path + "/payload", contact_offset=0.02, rest_offset=0.001
                 )
                 return prim
-            
+
             spawn_with_payload = clone(spawn_with_payload)
             spawn_with_payload = multi(spawn_with_payload)
-                
+
             # the scene is created from a SceneCfg object in a declarative way
             # see the docstring of `InteractiveSceneCfg` for more details
             class SceneCfg(InteractiveSceneCfg):
@@ -125,7 +125,7 @@ def main(cfg):
                     prim_path="/World/skyLight",
                     spawn=sim_utils.DomeLightCfg(color=(0.13, 0.13, 0.13), intensity=1000.0),
                 )
-        
+
                 drone = HUMMINGBIRD_CFG
                 drone.prim_path = "{ENV_REGEX_NS}/Robot_0"
                 drone.spawn.func = spawn_with_payload
@@ -137,15 +137,15 @@ def main(cfg):
             # the environment offset is added to the initial state
             init_state = self.default_init_state[env_ids]
             init_state[:, :3] += self.scene.env_origins[env_ids]
-            
+
             self.drone.write_root_state_to_sim(init_state, env_ids)
             self.payload_traj.clear()
-        
+
         def debug_vis(self):
             payload_pos_w = self.drone.data.body_pos_w[0, self.payload_body_id]
             self.payload_traj.append(payload_pos_w.clone())
             self.debug_draw.plot(torch.stack(self.payload_traj))
-    
+
     env: MyEnv = MyEnv(cfg)
 
     def policy(tensordict: TensorDict):
@@ -157,15 +157,22 @@ def main(cfg):
         target_yaw = torch.zeros(*env.drone.shape, 1, device=env.device)
         action = torch.cat([target_pos, target_yaw], dim=-1)
         tensordict["agents", "action"] = action
+        # print(f"{tensordict['agents', 'action']=}")
         return tensordict
-    
-    tensordict = env.reset()
 
-    while True:
-        tensordict = policy(tensordict)
-        # torchrl automatically handles stepping and reset for us
-        _, tensordict = env.step_and_maybe_reset(tensordict)
+    def rollout(env: IsaacEnv):
+        data_ = env.reset()
+        result = []
+        for _ in trange(env.max_episode_length):
+            data_ = policy(data_)
+            data, data_ = env.step_and_maybe_reset(data_)
+            result.append(data)
+        return torch.stack(result)
 
-    
+    while app.is_running():
+        rollout(env)
+    app.close()
+
+
 if __name__ == "__main__":
     main()

@@ -17,7 +17,7 @@ def main(cfg):
     print(OmegaConf.to_yaml(cfg))
 
     import omni_drones.utils.scene as scene_utils
-    from omni.isaac.core.simulation_context import SimulationContext
+    from isaacsim.core.api.simulation_context import SimulationContext
     from omni_drones.controllers import AttitudeController
     from omni_drones.robots.drone import MultirotorBase
     from omni_drones.utils.torch import euler_to_quaternion, quaternion_to_euler
@@ -69,15 +69,15 @@ def main(cfg):
         drone._reset_idx(torch.tensor([0]))
         drone.set_world_poses(init_pos, init_rot)
         drone.set_velocities(init_vels)
-        # flush the buffer so that the next getter invocation 
+        # flush the buffer so that the next getter invocation
         # returns up-to-date values
-        sim._physics_sim_view.flush() 
-    
+        sim._physics_sim_view.flush()
+
     reset()
     drone_state = drone.get_state()[..., :13].squeeze(0)
 
     frames_vis = []
-    
+
     from tqdm import tqdm
     for i in tqdm(range(500)):
         if sim.is_stopped():
@@ -86,8 +86,8 @@ def main(cfg):
             sim.render()
             continue
         action = controller(
-            drone_state, 
-            target_yaw_rate=target_yaw_rate, 
+            drone_state,
+            target_yaw_rate=target_yaw_rate,
             target_pitch=target_pitch,
             target_thrust=(drone.MASS_0 * 10.)
         )

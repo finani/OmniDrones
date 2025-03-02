@@ -1,7 +1,7 @@
 import hydra
 import os
 import torch
-from omegaconf import OmegaConf
+from tqdm import trange
 
 from omni_drones import init_simulation_app
 from tensordict import TensorDict
@@ -11,18 +11,17 @@ from tensordict import TensorDict
 def main(cfg):
     app = init_simulation_app(cfg)
 
-    # due to the design of Isaac Sim, these imports are only available 
+    # due to the design of Isaac Sim, these imports are only available
     # after the SimulationApp instance is created
     from omni_drones.envs.isaac_env import IsaacEnv
     from omni_drones.robots.assets import Multirotor, HUMMINGBIRD_CFG
 
-    from omni.isaac.lab.scene import InteractiveSceneCfg
-    from omni.isaac.lab.assets import AssetBaseCfg
-    from omni.isaac.lab.terrains import TerrainImporterCfg
-    import omni.isaac.lab.sim as sim_utils
+    from isaaclab.scene import InteractiveSceneCfg
+    from isaaclab.assets import AssetBaseCfg
+    from isaaclab.terrains import TerrainImporterCfg
+    import isaaclab.sim as sim_utils
 
     class MyEnv(IsaacEnv):
-
         def __init__(self, cfg):
             super().__init__(cfg)
             # the `__init__` method invokes `_design_scene` to create the scene
@@ -55,7 +54,7 @@ def main(cfg):
                     terrain_type="plane",
                     collision_group=-1,
                 )
-                
+
                 # lights
                 light = AssetBaseCfg(
                     prim_path="/World/light",
@@ -67,7 +66,7 @@ def main(cfg):
                 )
 
                 drone = HUMMINGBIRD_CFG.replace(
-                    prim_path="{ENV_REGEX_NS}/Robot_0", 
+                    prim_path="{ENV_REGEX_NS}/Robot_0",
                 )
 
             return SceneCfg(num_envs=cfg.num_envs, env_spacing=2.5)
@@ -77,10 +76,10 @@ def main(cfg):
             # the environment offset is added to the initial state
             init_state = self.default_init_state[env_ids]
             init_state[:, :3] += self.scene.env_origins[env_ids]
-            
+
             self.drone.write_root_state_to_sim(init_state, env_ids)
-    
-    env: MyEnv = MyEnv(cfg)
+
+    env = MyEnv(cfg)
     env.drone.multirotor_data.drag_coef[:] = 0.5
 
     def policy(tensordict: TensorDict):
@@ -92,15 +91,22 @@ def main(cfg):
         target_yaw = env.target_yaw.unsqueeze(1)
         action = torch.cat([target_pos, target_yaw], dim=-1)
         tensordict["agents", "action"] = action
+        # print(f"{tensordict['agents', 'action']=}")
         return tensordict
-    
-    tensordict = env.reset()
 
-    while True:
-        tensordict = policy(tensordict)
-        # torchrl automatically handles stepping and reset for us
-        _, tensordict = env.step_and_maybe_reset(tensordict)
+    def rollout(env: IsaacEnv):
+        data_ = env.reset()
+        result = []
+        for _ in trange(env.max_episode_length):
+            data_ = policy(data_)
+            data, data_ = env.step_and_maybe_reset(data_)
+            result.append(data)
+        return torch.stack(result)
 
-    
+    while app.is_running():
+        rollout(env)
+    app.close()
+
+
 if __name__ == "__main__":
     main()

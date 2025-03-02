@@ -7,7 +7,7 @@ viewer:
   lookat: [0., 0., 1.]
 
 sim:
-  _target_: omni.isaac.lab.sim.SimulationCfg
+  _target_: isaaclab.sim.SimulationCfg
 
   physics_prim_path: /physicsScene
   dt: 0.016
@@ -16,7 +16,7 @@ sim:
   disable_contact_processing: true
   device: cuda:0
   physx:
-    _target_: omni.isaac.lab.sim.PhysxCfg
+    _target_: isaaclab.sim.PhysxCfg
     solver_type: 1
     min_position_iteration_count: 1
     max_position_iteration_count: 255
@@ -43,7 +43,7 @@ sim:
 task:
   _target_: omni_drones.envs.isaac_env.TaskCfg
   max_episode_length: 500
-  
+
   actions:
     - key: [agents, action]
       items:

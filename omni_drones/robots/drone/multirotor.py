@@ -31,6 +31,7 @@ from torch.func import vmap
 from tensordict.nn import make_functional
 from torchrl.data import BoundedTensorSpec, CompositeSpec, UnboundedContinuousTensorSpec
 from tensordict import TensorDict
+import omni.physics.tensors.impl.api as physx
 
 from omni_drones.views import RigidPrimView
 from omni_drones.actuators.rotor_group import RotorGroup
@@ -241,11 +242,14 @@ class MultirotorBase(RobotBase):
         logging.info(f"Setup randomization:\n" + pprint.pformat(dict(self.randomization)))
 
     def apply_action(self, actions: torch.Tensor) -> torch.Tensor:
+        # print(f"{actions=}")
         rotor_cmds = actions.expand(*self.shape, self.num_rotors)
         last_throttle = self.throttle.clone()
         thrusts, moments = vmap(vmap(self.rotors, randomness="different"), randomness="same")(
             rotor_cmds, self.rotor_params
         )
+        # print(f"{thrusts=}")
+        # print(f"{moments=}")
 
         rotor_pos, rotor_rot = self.rotors_view.get_world_poses()
         torque_axis = quat_axis(rotor_rot.flatten(end_dim=-2), axis=2).unflatten(0, (*self.shape, self.num_rotors))
@@ -268,12 +272,24 @@ class MultirotorBase(RobotBase):
                 quat_rotate(self.rot, self.thrusts.sum(-2)),
                 kz=0.3
             ).sum(-2)
+        # else:
+        #     self.forces[:] = self.downwash(
+        #         self.pos,
+        #         self.pos,
+        #         quat_rotate(self.rot, self.thrusts.sum(-2)),
+        #         kz=0.3
+        #     ).sum(-3)
+        # print(f"{self.forces=}")
         self.forces[:] += (self.drag_coef * self.masses) * self.vel[..., :3]
 
-        self.rotors_view.apply_forces_and_torques_at_pos(
+        # print(f"{self.thrusts=}")
+        # print(f"{self.thrusts.reshape(-1, 3)=}")
+        self.rotors_view.apply_forces(
             self.thrusts.reshape(-1, 3),
             is_global=False
         )
+        # print(f"{self.forces=}")
+        # print(f"{self.torques=}")
         self.base_link.apply_forces_and_torques_at_pos(
             self.forces.reshape(-1, 3),
             self.torques.reshape(-1, 3),
@@ -410,6 +426,7 @@ class MultirotorBase(RobotBase):
         z = torch.clip(z, 0)
         v = torch.exp(-0.5 * torch.square(kr * r / z)) / (1 + kz * z)**2
         f = off_diag(v * - p1_t)
+        # print(f"{f=}")
         return f
 
     @staticmethod

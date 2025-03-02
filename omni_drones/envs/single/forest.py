@@ -132,7 +132,7 @@ class Forest(IsaacEnv):
 
         import omni.isaac.lab.sim as sim_utils
         from omni.isaac.lab.assets import AssetBaseCfg
-        from omni.isaac.lab.sensors import RayCaster, RayCasterCfg, patterns
+        from isaaclab.sensors import RayCaster, RayCasterCfg, patterns
         from omni.isaac.lab.terrains import (
             TerrainImporterCfg,
             TerrainImporter,

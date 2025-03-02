@@ -21,8 +21,6 @@
 # SOFTWARE.
 
 
-import omni.isaac.core.utils.torch as torch_utils
-import omni_drones.utils.kit as kit_utils
 import omni_drones.utils.scene as scene_utils
 import torch
 import torch.distributions as D

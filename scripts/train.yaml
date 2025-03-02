@@ -9,10 +9,10 @@ headless: true
 sim: ${task.sim}
 env: ${task.env}
 
-total_frames: 150_000_000
+total_frames: 20_000_000
 max_iters: -1
-eval_interval: -1
-save_interval: -1
+eval_interval: 1_000
+save_interval: 2_000
 seed: 0
 
 viewer:

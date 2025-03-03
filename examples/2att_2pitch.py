@@ -73,7 +73,7 @@ def main(cfg):
                     prim_path="{ENV_REGEX_NS}/Robot",
                 )
 
-            return SceneCfg(num_envs=cfg.num_envs, env_spacing=2.5)
+            return SceneCfg(num_envs=cfg.num_envs, env_spacing=cfg.env_spacing)
 
         def _reset_idx(self, env_ids: torch.Tensor):
             # since we have multiple parallel environments

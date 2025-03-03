@@ -1,5 +1,6 @@
 headless: false
 num_envs: 4
+env_spacing: 2.5
 robot_name: hummingbird
 goal: [3, 0, 0, 90]
 # x[m or m/s or m/s/s], y[m or m/s or m/s/s], z[m or m/s or m/s/s], yaw[deg or dps]

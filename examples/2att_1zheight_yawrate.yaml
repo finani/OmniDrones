@@ -1,5 +1,6 @@
 headless: false
 num_envs: 4
+env_spacing: 2.5
 robot_name: firefly
 goal: [0, 0, 90, 1.5]
 # roll[deg], pitch[deg], yaw[deg or dps], z[force or height]

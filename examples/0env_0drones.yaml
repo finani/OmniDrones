@@ -1,9 +1,7 @@
 headless: false
 num_envs: 4
 env_spacing: 2.5
-robot_name: hummingbird
-goal: [1, 0, 1.5, 90]
-# x[m or m/s or m/s/s], y[m or m/s or m/s/s], z[m or m/s or m/s/s], yaw[deg or dps]
+robot_name: firefly
 
 viewer:
   resolution: [960, 720]
@@ -55,8 +53,8 @@ task:
           asset_name: drone
           xyz_mode: pos
           yaw_mode: angle
-          inertia: [0.007, 0.007, 0.012]
-          ang_rate_gain: [0.1, 0.1, 0.025]
-          attitude_gain: [0.7, 0.7, 0.035]
-          vel_gain: [2.2, 2.2, 2.2]
-          pos_gain: [4, 4, 4]
+          inertia: [0.0347563, 0.0458929, 0.0977]
+          ang_rate_gain: [0.52, 0.52, 0.18]
+          attitude_gain: [3, 3, 0.15]
+          vel_gain: [4.7, 4.7, 4.7]
+          pos_gain: [6, 6, 6]

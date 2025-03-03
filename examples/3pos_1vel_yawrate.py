@@ -66,7 +66,7 @@ def main(cfg):
                     prim_path="{ENV_REGEX_NS}/Robot",
                 )
 
-            return SceneCfg(num_envs=cfg.num_envs, env_spacing=2.5)
+            return SceneCfg(num_envs=cfg.num_envs, env_spacing=cfg.env_spacing)
 
         def _reset_idx(self, env_ids: torch.Tensor):
             # since we have multiple parallel environments
@@ -78,13 +78,11 @@ def main(cfg):
 
     env = MyEnv(cfg)
 
-    # a simple policy that takes random actions
     def policy(tensordict: TensorDict):
         target_pos = env.target_pos
         target_yaw = env.target_yaw.unsqueeze(1)
         action = torch.cat([target_pos, target_yaw], dim=-1)
         tensordict["agents", "action"] = action
-        # tensordict.update(env.full_action_spec.rand())
         # print(f"{tensordict['agents', 'action']=}")
         return tensordict
 

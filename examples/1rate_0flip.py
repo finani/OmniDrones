@@ -16,6 +16,7 @@ def main(cfg):
     # after the SimulationApp instance is created
     from omni_drones.envs.isaac_env import IsaacEnv
     from omni_drones.robots.assets import Multirotor, get_robot_cfg
+    from omni_drones.utils.torch import euler_to_quaternion
 
     from isaaclab.scene import InteractiveSceneCfg
     from isaaclab.assets import AssetBaseCfg
@@ -32,13 +33,10 @@ def main(cfg):
             # let's get the drone entity
             self.drone: Multirotor = self.scene["drone"]
             self.default_init_state = self.drone.data.default_root_state.clone()
+            body_rate = self.drone.data.root_ang_vel_b
 
-            self.target_roll = torch.zeros(self.drone.shape, device=self.device)
-            self.target_roll[:] = cfg.goal[0] / 180.0 * torch.pi
-            self.target_pitch = torch.zeros(self.drone.shape, device=self.device)
-            self.target_pitch[:] = cfg.goal[1] / 180.0 * torch.pi
-            self.target_yaw = torch.zeros(self.drone.shape, device=self.device)
-            self.target_yaw[:] = cfg.goal[2] / 180.0 * torch.pi
+            self.target_rate = torch.zeros(body_rate.size(), device=self.device)
+            self.target_rate[:, :3] = torch.as_tensor(cfg.goal[:3]) / 180.0 * torch.pi
 
             # self.drone_mass = self.drone.root_physx_view.get_masses().sum(-1, keepdim=True).to(self.device)
             # self.drone_mass = self.drone_mass.flatten(0, -2)[0]
@@ -80,16 +78,18 @@ def main(cfg):
             init_state = self.default_init_state[env_ids]
             init_state[:, :3] += self.scene.env_origins[env_ids]
 
+            init_rpy = torch.zeros(self.scene.env_origins.size(), device=self.device)
+            init_rpy[:, 2] = 45.0 / 180.0 * torch.pi
+            init_state[:, 3:7] = euler_to_quaternion(init_rpy)
+
             self.drone.write_root_state_to_sim(init_state, env_ids)
 
     env = MyEnv(cfg)
 
     def policy(tensordict: TensorDict):
-        target_pitch = env.target_pitch.unsqueeze(1)
-        target_roll = env.target_roll.unsqueeze(1)
-        target_yaw = env.target_yaw.unsqueeze(1)
+        target_rate = env.target_rate
         target_z = env.target_z.unsqueeze(1)
-        action = torch.cat([target_pitch, target_roll, target_yaw, target_z], dim=-1)
+        action = torch.cat([target_rate, target_z], dim=-1)
         tensordict["agents", "action"] = action
         # print(f"{tensordict['agents', 'action']=}")
         return tensordict

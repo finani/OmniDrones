@@ -84,7 +84,7 @@ class Multirotor(Articulation):
 
                 forces_b[..., actuator.body_ids, 2] += thrusts
                 # torques[..., actuator.body_ids, 2] = momentum
-                # mannually aggregate the torques along the z-axis
+                # manually aggregate the torques along the z-axis
                 torques_b[..., self.base_id, 2] += momentum.sum(dim=-1, keepdim=True)
 
         # drag_w = (
@@ -283,5 +283,4 @@ class RotorCfg(ActuatorBaseCfg):
     """
     The throttle down time constant.
     """
-
 

@@ -2,8 +2,10 @@ headless: false
 num_envs: 4
 env_spacing: 2.5
 robot_name: hummingbird
-goal: [1, 0, 1.5, 90]
-# x[m or m/s or m/s/s], y[m or m/s or m/s/s], z[m or m/s or m/s/s], yaw[deg or dps]
+goal: [180, 0, 0, 14.0479206009] # 7.02396030045
+# roll[dps], pitch[dps], yaw[dps], z[force]
+# hummingbird_mass = 0.7160
+# gravity = 9.8100004196167
 
 viewer:
   resolution: [960, 720]
@@ -51,12 +53,7 @@ task:
   actions:
     - key: [agents, action]
       items:
-        LeePositionController:
+        RateController:
           asset_name: drone
-          xyz_mode: pos
-          yaw_mode: angle
           inertia: [0.007, 0.007, 0.012]
           ang_rate_gain: [0.1, 0.1, 0.025]
-          attitude_gain: [0.7, 0.7, 0.035]
-          vel_gain: [2.2, 2.2, 2.2]
-          pos_gain: [4, 4, 4]

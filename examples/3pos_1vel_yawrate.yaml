@@ -1,0 +1,61 @@
+headless: false
+num_envs: 4
+robot_name: hummingbird
+goal: [1, 0, 0, 90]
+# x[m or m/s or m/s/s], y[m or m/s or m/s/s], z[m or m/s or m/s/s], yaw[deg or dps]
+
+viewer:
+  resolution: [960, 720]
+  eye: [8, 0., 6.]
+  lookat: [0., 0., 1.]
+
+sim:
+  _target_: isaaclab.sim.SimulationCfg
+
+  physics_prim_path: /physicsScene
+  dt: 0.016129032258064516
+  enable_scene_query_support: true
+  use_fabric: true
+  disable_contact_processing: true
+  device: cuda:0
+  physx:
+    _target_: isaaclab.sim.PhysxCfg
+    solver_type: 1
+    min_position_iteration_count: 1
+    max_position_iteration_count: 255
+    min_velocity_iteration_count: 0
+    max_velocity_iteration_count: 255
+    enable_ccd: false
+    enable_stabilization: true
+    enable_enhanced_determinism: false
+    bounce_threshold_velocity: 0.5
+    friction_offset_threshold: 0.04
+    friction_correlation_distance: 0.025
+    gpu_max_rigid_contact_count: 2097152
+    gpu_max_rigid_patch_count: 2097152
+    gpu_found_lost_pairs_capacity: 1048576
+    gpu_found_lost_aggregate_pairs_capacity: 33554432
+    gpu_total_aggregate_pairs_capacity: 524288
+    gpu_collision_stack_size: 33554432
+    gpu_heap_capacity: 16777216
+    gpu_temp_buffer_capacity: 16777216
+    gpu_max_num_partitions: 8
+    gpu_max_soft_body_contacts: 1048576
+    gpu_max_particle_contacts: 1048576
+
+task:
+  _target_: omni_drones.envs.isaac_env.TaskCfg
+  max_episode_length: 200
+
+  actions:
+    - key: [agents, action]
+      items:
+        LeePositionController:
+          asset_name: drone
+          xyz_mode: vel
+          yaw_mode: rate
+          inertia: [0.007, 0.007, 0.012]
+          ang_rate_gain: [0.1, 0.1, 0.025]
+          attitude_gain: [0.7, 0.7, 0.035]
+          vel_gain: [2.2, 2.2, 2.2]
+          pos_gain: [4, 4, 4]

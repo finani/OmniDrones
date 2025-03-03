@@ -22,38 +22,46 @@
 
 
 import abc
-
-from typing import Dict, List, Optional, Tuple, Type, Union, Callable
-
 import omni.usd
 import torch
 import logging
-import carb
 import numpy as np
-from omni.isaac.cloner import GridCloner
-from omni.isaac.core.simulation_context import SimulationContext
-from omni.isaac.core.utils import prims as prim_utils, stage as stage_utils
-from omni.isaac.core.utils.extensions import enable_extension
-from omni.isaac.core.utils.viewports import set_camera_view
+import hydra
+import builtins
+import inspect
 
 from tensordict.tensordict import TensorDict, TensorDictBase
-from torchrl.data import CompositeSpec, TensorSpec, DiscreteTensorSpec
+from torchrl.data import (
+    Composite,
+    TensorSpec,
+    UnboundedContinuous,
+    Binary
+)
 from torchrl.envs import EnvBase
 
-from omni_drones.robots.robot import RobotBase
 from omni_drones.utils.torchrl import AgentSpec
 
-from isaacsim.util.debug_draw import _debug_draw
+from collections import OrderedDict
+
+from isaaclab.scene import InteractiveScene
+from isaaclab.sim import SimulationContext
+from isaaclab.utils.timer import Timer
+
+import isaaclab.sim as sim_utils
+from dataclasses import dataclass, field
+from typing import Dict, List, Optional, Tuple, Type, Union, Callable
 
 class DebugDraw:
     def __init__(self):
+        from isaacsim.util.debug_draw import _debug_draw
         self._draw = _debug_draw.acquire_debug_draw_interface()
 
     def clear(self):
         self._draw.clear_lines()
+        self._draw.clear_points()
 
     def plot(self, x: torch.Tensor, size=2.0, color=(1., 1., 1., 1.)):
-        if not (x.ndim == 2) and (x.shape[1] == 3):
+        if not ((x.ndim == 2) and (x.shape[1] == 3)):
             raise ValueError("x must be a tensor of shape (N, 3).")
         x = x.cpu()
         point_list_0 = x[:-1].tolist()
@@ -73,6 +81,17 @@ class DebugDraw:
         colors = [color] * len(point_list_0)
         self._draw.draw_lines(point_list_0, point_list_1, colors, sizes)
 
+@dataclass
+class TaskCfg:
+    num_envs: int = 1
+    max_episode_length: int = 1000
+
+    observations: List[Dict[str, Dict]] = field(default_factory=list)
+    actions: List[Dict[str, Dict]] = field(default_factory=list)
+    rewards: Dict[str, Dict] = field(default_factory=dict)
+    termination: Dict[str, Dict] = field(default_factory=dict)
+    randomizations: Dict[str, Dict] = field(default_factory=dict)
+
 
 class IsaacEnv(EnvBase):
 
@@ -81,94 +100,71 @@ class IsaacEnv(EnvBase):
 
     REGISTRY: Dict[str, Type["IsaacEnv"]] = {}
 
-    def __init__(self, cfg, headless):
+    def __init__(self, cfg):
         super().__init__(
-            device=cfg.sim.device, batch_size=[cfg.env.num_envs], run_type_checks=False
+            device=cfg.sim.device,
+            batch_size=[cfg.num_envs],
+            run_type_checks=False
         )
-        # store inputs to class
         self.cfg = cfg
-        self.enable_render(not headless)
-        self.enable_viewport = True
-        # extract commonly used parameters
-        self.num_envs = self.cfg.env.num_envs
-        self.max_episode_length = self.cfg.env.max_episode_length
-        self.substeps = self.cfg.sim.substeps
+        self.task_cfg: TaskCfg = hydra.utils.instantiate(self.cfg.task)
 
-        torch.backends.cudnn.benchmark = True
-        torch.backends.cudnn.deterministic = False
+        self.max_episode_length = self.task_cfg.max_episode_length
+        self.substeps = 1
 
-        # check that simulation is running
-        if stage_utils.get_current_stage() is None:
-            raise RuntimeError(
-                "The stage has not been created. Did you run the simulator?"
+        if SimulationContext.instance() is None:
+            sim_cfg = hydra.utils.instantiate(self.cfg.sim)
+            self.sim = SimulationContext(sim_cfg)
+        else:
+            raise RuntimeError("Simulation context already exists. Cannot create a new one.")
+
+        # set camera view for "/OmniverseKit_Persp" camera
+        self.sim.set_camera_view(eye=self.cfg.viewer.eye, target=self.cfg.viewer.lookat)
+        # create render product
+        try:
+            import omni.replicator.core as rep
+            # create render product
+            self._render_product = rep.create.render_product(
+                "/OmniverseKit_Persp", tuple(self.cfg.viewer.resolution)
             )
-        # flatten out the simulation dictionary
-        sim_params = self.cfg.sim
-        if sim_params is not None:
-            if "physx" in sim_params:
-                physx_params = sim_params.pop("physx")
-                sim_params.update(physx_params)
-        # set flags for simulator
-        self._configure_simulation_flags(sim_params)
-        self.sim = SimulationContext(
-            stage_units_in_meters=1.0,
-            physics_dt=self.cfg.sim.dt,
-            rendering_dt=self.cfg.sim.dt, # * self.cfg.sim.substeps,
-            backend="torch",
-            sim_params=sim_params,
-            physics_prim_path="/physicsScene",
-            device="cuda:0",
-        )
-        self._create_viewport_render_product()
-        self.dt = self.sim.get_physics_dt()
+            # create rgb annotator -- used to read data from the render product
+            self._rgb_annotator = rep.AnnotatorRegistry.get_annotator("rgb", device="cpu")
+            self._rgb_annotator.attach([self._render_product])
+        except ModuleNotFoundError as e:
+            print(e)
+            print("Set enable_cameras=true to use cameras.")
+
+        # print useful information
+        print("[INFO]: Base environment:")
+        print(f"\tEnvironment device    : {self.device}")
+        print(f"\tPhysics step-size     : {self.physics_dt}")
+
+        # generate scene
+        with Timer("[INFO]: Time taken for scene creation"):
+            self.scene = InteractiveScene(self._design_scene())
+            for key in self.scene.articulations.keys():
+                if self.scene[key] is not None:
+                    self.scene[key]._env = self
+        print("[INFO]: Scene manager: ", self.scene)
+
+        if builtins.ISAAC_LAUNCHED_FROM_TERMINAL is False:
+            print("[INFO]: Starting the simulation. This may take a few seconds. Please wait...")
+            with Timer("[INFO]: Time taken for simulation start"):
+                self.sim.reset()
+        for _ in range(4):
+            self.sim.step(render=True)
+
+        self.scene.update(0.)
+        self.step_dt = self.physics_dt * self.substeps
+
         # add flag for checking closing status
         self._is_closed = False
-        # set camera view
-        # create cloner for duplicating the scenes
-        cloner = GridCloner(spacing=self.cfg.env.env_spacing)
-        cloner.define_base_env("/World/envs")
-        # create the xform prim to hold the template environment
-        if not prim_utils.is_prim_path_valid(self.template_env_ns):
-            prim_utils.define_prim(self.template_env_ns)
-        # setup single scene
-        global_prim_paths = self._design_scene()
-        # check if any global prim paths are defined
-        if global_prim_paths is None:
-            global_prim_paths = list()
-        # clone the scenes into the namespace "/World/envs" based on template namespace
-        self.envs_prim_paths = cloner.generate_paths(
-            self.env_ns + "/env", self.num_envs
-        )
-        assert len(self.envs_prim_paths) == self.num_envs
-        self.envs_positions = cloner.clone(
-            source_prim_path=self.template_env_ns,
-            prim_paths=self.envs_prim_paths,
-            replicate_physics=self.cfg.sim.replicate_physics,
-        )
-        # convert environment positions to torch tensor
-        self.envs_positions = torch.tensor(
-            self.envs_positions, dtype=torch.float, device=self.device
-        )
-        # find the environment closest to the origin for visualization
-        self.central_env_idx = self.envs_positions.norm(dim=-1).argmin()
-        central_env_pos = self.envs_positions[self.central_env_idx].cpu().numpy()
-        set_camera_view(
-            eye=central_env_pos + np.asarray(self.cfg.viewer.eye),
-            target=central_env_pos + np.asarray(self.cfg.viewer.lookat)
-        )
+        self._specs_initialized = False
 
-        RobotBase._envs_positions = self.envs_positions.unsqueeze(1)
-
-        # filter collisions within each environment instance
-        physics_scene_path = self.sim.get_physics_context().prim_path
-        cloner.filter_collisions(
-            physics_scene_path,
-            "/World/collisions",
-            prim_paths=self.envs_prim_paths,
-            global_paths=global_prim_paths,
-        )
-        self.sim.reset()
-        self.debug_draw = DebugDraw()
+        try:
+            self.debug_draw = DebugDraw()
+        except ModuleNotFoundError:
+            print("To enbale debug_draw, set `headless=false` or `offscreen_render=true`.")
 
         self._tensordict = TensorDict(
             {
@@ -177,15 +173,114 @@ class IsaacEnv(EnvBase):
             self.batch_size,
         )
         self.progress_buf = self._tensordict["progress"]
-        self.done_spec = CompositeSpec({
-            "done": DiscreteTensorSpec(2, (1,), dtype=torch.bool),
-            "terminated": DiscreteTensorSpec(2, (1,), dtype=torch.bool),
-            "truncated": DiscreteTensorSpec(2, (1,), dtype=torch.bool),
-        }).expand(self.num_envs).to(self.device)
-        self._set_specs()
-        import pprint
-        pprint.pprint(self.fake_tensordict().shapes)
 
+    def resolve_specs(self):
+        self._update_common()
+
+        import omni_drones.envs.mdp as mdp
+        members = dict(inspect.getmembers(self.__class__, inspect.isclass))
+
+        OBS_FUNCS = mdp.OBS_FUNCS
+        OBS_FUNCS.update({k: v for k, v in members.items() if issubclass(v, mdp.ObservationFunc)})
+        ACT_FUNCS = mdp.ACT_FUNCS
+        ACT_FUNCS.update({k: v for k, v in members.items() if issubclass(v, mdp.ActionFunc)})
+        REW_FUNCS = mdp.REW_FUNCS
+        REW_FUNCS.update({k: v for k, v in members.items() if issubclass(v, mdp.RewardFunc)})
+        TERM_FUNCS = mdp.TERM_FUNCS
+        TERM_FUNCS.update({k: v for k, v in members.items() if issubclass(v, mdp.TerminationFunc)})
+        RAND_FUNCS = mdp.RAND_FUNCS
+        RAND_FUNCS.update({k: v for k, v in members.items() if issubclass(v, mdp.Randomization)})
+
+        self._update_callbacks = []
+        self._debug_vis_callbacks = [self.debug_vis]
+        self._reset_callbacks = []
+
+        reward_spec = Composite({
+            "reward": UnboundedContinuous(1),
+            "stats": {
+                "return": UnboundedContinuous(1),
+                "episode_len": UnboundedContinuous(1),
+                "success": UnboundedContinuous(1),
+            }
+        })
+
+        def get_key(key):
+            if isinstance(key, str):
+                return key
+            return tuple(key)
+
+        for key, params in self.task_cfg.randomizations.items():
+            randomization = RAND_FUNCS[key](self, **params)
+            self._reset_callbacks.append(randomization.reset)
+
+        self.observation_funcs = OrderedDict()
+        for group in self.task_cfg.observations:
+            observation_group = OrderedDict()
+            key = get_key(group["key"])
+            for obs_name, params in group["items"].items():
+                observation_group[obs_name] = OBS_FUNCS[obs_name](self, **params)
+            self.observation_funcs[key] = observation_group
+
+        self.action_groups = OrderedDict()
+        action_spec = Composite({}, shape=[self.num_envs])
+        for group in self.task_cfg.actions:
+            key = get_key(group["key"])
+            action_group = OrderedDict()
+            for act_name, params in group["items"].items():
+                act_func = ACT_FUNCS[act_name](self, **params)
+                self._debug_vis_callbacks.append(act_func.debug_vis)
+                action_group[act_name] = act_func
+            action_group = mdp.ActionGroup(action_group)
+            self.action_groups[key] = action_group
+            action_spec[key] = UnboundedContinuous(action_group.action_shape)
+        self.action_spec = action_spec.to(self.device)
+
+        obs = self._compute_observation()
+        observation_spec = Composite({}, shape=[self.num_envs])
+        for k, v in obs.items(True, True):
+            observation_spec[k] = UnboundedContinuous(v.shape)
+        self.observation_spec = observation_spec.to(self.device)
+
+        self.reward_funcs = OrderedDict()
+        for key, params in self.task_cfg.rewards.items():
+            self.reward_funcs[key] = REW_FUNCS[key](self, **params)
+            reward_spec["stats", key] = UnboundedContinuous(1, device=self.device)
+        if not len(self.reward_funcs):
+            logging.warning("No reward functions specified. Using a default reward function of 1.0.")
+            self.reward_funcs["_"] = lambda: torch.ones(self.num_envs, 1, device=self.device)
+            reward_spec["stats", "_"] = UnboundedContinuous(1, device=self.device)
+        self.reward_spec = reward_spec.expand(self.num_envs).to(self.device)
+        self.stats = self.reward_spec["stats"].zero()
+
+        self.termination_funcs = OrderedDict()
+        for key, params in self.task_cfg.termination.items():
+            self.termination_funcs[key] = TERM_FUNCS[key](self, **params)
+        if not len(self.termination_funcs):
+            logging.warning("No termination functions specified. Using a default termination function of False")
+            self.termination_funcs["_"] = lambda: torch.zeros(self.num_envs, 1, dtype=bool, device=self.device)
+
+        self.done_spec = (
+            Composite(
+                {
+                    "done": Binary(1, dtype=bool),
+                    "terminated": Binary(1, dtype=bool),
+                    "truncated": Binary(1, dtype=bool),
+                }
+            )
+            .expand(self.num_envs)
+            .to(self.device)
+        )
+
+        self._specs_initialized = True
+
+    @property
+    def num_envs(self) -> int:
+        """The number of instances of the environment that are running."""
+        return self.scene.num_envs
+
+    @property
+    def physics_dt(self) -> float:
+        return self.sim.get_physics_dt()
 
     @classmethod
     def __init_subclass__(cls, **kwargs):
@@ -210,23 +305,7 @@ class IsaacEnv(EnvBase):
         )
 
     @abc.abstractmethod
-    def _set_specs(self):
-        raise NotImplementedError
-
-    @abc.abstractmethod
-    def _design_scene(self) -> Optional[List[str]]:
-        """Creates the template environment scene.
-
-        All prims under the *template namespace* will be duplicated across the
-        stage and collisions between the duplicates will be filtered out. In case,
-        there are any prims which need to be a common collider across all the
-        environments, they should be returned as a list of prim paths. These could
-        be prims like the ground plane, walls, etc.
-
-        Returns:
-            Optional[List[str]]: List of prim paths which are common across all the
-                environments and need to be considered for common collision filtering.
-        """
+    def _design_scene(self):
         raise NotImplementedError
 
     def close(self):
@@ -250,85 +329,82 @@ class IsaacEnv(EnvBase):
             env_mask = torch.ones(self.num_envs, dtype=bool, device=self.device)
         env_ids = env_mask.nonzero().squeeze(-1)
         self._reset_idx(env_ids)
-        # self.sim.step(render=False)
+        self.scene.reset(env_ids)
+        for callback in self._reset_callbacks:
+            callback(env_ids)
+        # self.scene.update(self.step_dt)
         self.progress_buf[env_ids] = 0.
+        self.stats[env_ids] = 0.
         tensordict = TensorDict({}, self.batch_size, device=self.device)
-        tensordict.update(self._compute_state_and_obs())
-        tensordict.set("truncated", (self.progress_buf > self.max_episode_length).unsqueeze(1))
+        tensordict.update(self.observation_spec.zero())
         return tensordict
 
     @abc.abstractmethod
     def _reset_idx(self, env_ids: torch.Tensor):
         raise NotImplementedError
 
+    def _update_common(self):
+        pass
+
     def _step(self, tensordict: TensorDictBase) -> TensorDictBase:
         for substep in range(self.substeps):
-            self._pre_sim_step(tensordict)
-            self.sim.step(self._should_render(substep))
-        self._post_sim_step(tensordict)
+            for group_name, action_group in self.action_groups.items():
+                action_group.apply_action(tensordict[group_name])
+            self.scene.write_data_to_sim()
+            self.sim.step(False)
+            self.scene.update(self.physics_dt)
+        for callback in self._update_callbacks:
+            callback()
+        self._update_common()
+
+        # perform rendering if gui is enabled
+        if self.sim.has_gui():
+            self.sim.render()
+            self.debug_draw.clear()
+            for callback in self._debug_vis_callbacks:
+                callback()
+
         self.progress_buf += 1
         tensordict = TensorDict({}, self.batch_size, device=self.device)
-        tensordict.update(self._compute_state_and_obs())
-        tensordict.update(self._compute_reward_and_done())
+        tensordict.update(self._compute_observation())
+        tensordict.update(self._compute_reward())
+        terminated = self._compute_termination()
+        truncated = (self.progress_buf >= self.max_episode_length).unsqueeze(1)
+        tensordict.set("terminated", terminated)
+        tensordict.set("truncated", truncated)
+        tensordict.set("done", terminated | truncated)
         return tensordict
 
-    def _pre_sim_step(self, tensordict: TensorDictBase):
-        pass
+    def _compute_observation(self):
+        observation = TensorDict({}, [self.num_envs])
+        for group, funcs in self.observation_funcs.items():
+            tensor = torch.cat([func() for func in funcs.values()], dim=-1)
+            observation[group] = tensor
+        return observation
 
-    def _post_sim_step(self, tensordict: TensorDictBase):
-        pass
+    def _compute_reward(self):
+        reward = []
+        for key, func in self.reward_funcs.items():
+            r = func() * self.step_dt
+            self.stats[key].add_(r)
+            reward.append(r)
+        reward = sum(reward)
+        self.stats["return"].add_(reward)
+        self.stats["episode_len"][:] = self.progress_buf.unsqueeze(1)
+        self.stats["success"][:] = (self.progress_buf >= self.max_episode_length * 0.9).unsqueeze(1).float()
+        return {"reward": reward, "stats": self.stats.clone()}
 
-    @abc.abstractmethod
-    def _compute_state_and_obs(self) -> TensorDictBase:
-        raise NotImplementedError
-
-    @abc.abstractmethod
-    def _compute_reward_and_done(self) -> TensorDictBase:
-        raise NotImplementedError
+    def _compute_termination(self):
+        terminated = []
+        for key, func in self.termination_funcs.items():
+            terminated.append(func())
+        terminated = torch.cat(terminated, dim=-1)
+        return terminated.any(dim=-1, keepdim=True)
 
     def _set_seed(self, seed: Optional[int] = -1):
         import omni.replicator.core as rep
         rep.set_global_seed(seed)
         torch.manual_seed(seed)
-
-    def _configure_simulation_flags(self, sim_params: dict = None):
-        """Configure simulation flags and extensions at load and run time."""
-        # acquire settings interface
-        carb_settings_iface = carb.settings.get_settings()
-        # enable hydra scene-graph instancing
-        # note: this allows rendering of instanceable assets on the GUI
-        carb_settings_iface.set_bool("/persistent/omnihydra/useSceneGraphInstancing", True)
-        # change dispatcher to use the default dispatcher in PhysX SDK instead of carb tasking
-        # note: dispatcher handles how threads are launched for multi-threaded physics
-        carb_settings_iface.set_bool("/physics/physxDispatcher", True)
-        # disable contact processing in omni.physx if requested
-        # note: helpful when creating contact reporting over limited number of objects in the scene
-        # if sim_params["disable_contact_processing"]:
-        #     carb_settings_iface.set_bool("/physics/disableContactProcessing", True)
-
-        # set flags based on whether rendering is enabled or not
-        # note: enabling extensions is order-sensitive. please do not change the order.
-        if self.enable_viewport:
-            # enable scene querying if rendering is enabled
-            # this is needed for some GUI features
-            sim_params["enable_scene_query_support"] = True
-            # load extra viewport extensions if requested
-            if self.enable_viewport:
-                # extension to enable UI buttons (otherwise we get attribute errors)
-                enable_extension("omni.kit.window.toolbar")
-                # extension to make RTX realtime and path-traced renderers
-                enable_extension("omni.kit.viewport.rtx")
-                # extension to make HydraDelegate renderers
-                enable_extension("omni.kit.viewport.pxr")
-            # enable viewport extension if not running in headless mode
-            enable_extension("omni.kit.viewport.bundle")
-            # load extra render extensions if requested
-            if self.enable_viewport:
-                # extension for window status bar
-                enable_extension("omni.kit.window.status_bar")
-        # enable isaac replicator extension
-        # note: moved here since it requires to have the viewport extension to be enabled first.
-        enable_extension("omni.replicator.isaac")
 
     def to(self, device) -> EnvBase:
         if torch.device(device) != self.device:
@@ -337,19 +413,8 @@ class IsaacEnv(EnvBase):
             )
         return self
 
-    def get_env_poses(self, world_poses: Tuple[torch.Tensor, torch.Tensor]):
-        pos, rot = world_poses
-        if pos.dim() == 3:
-            return pos - self.envs_positions.unsqueeze(1), rot
-        else:
-            return pos - self.envs_positions, rot
-
-    def get_world_poses(self, env_poses: Tuple[torch.Tensor, torch.Tensor]):
-        pos, rot = env_poses
-        if pos.dim() == 3:
-            return pos + self.envs_positions.unsqueeze(1), rot
-        else:
-            return pos + self.envs_positions, rot
+    def debug_vis(self):
+        pass
 
     def enable_render(self, enable: Union[bool, Callable]=True):
         if isinstance(enable, bool):
@@ -360,15 +425,10 @@ class IsaacEnv(EnvBase):
             raise TypeError("enable_render must be a bool or callable.")
 
     def render(self, mode: str="human"):
+        self.sim.render()
         if mode == "human":
             return None
         elif mode == "rgb_array":
-            # check if viewport is enabled -- if not, then complain because we won't get any data
-            if not self.enable_viewport:
-                raise RuntimeError(
-                    f"Cannot render '{mode}' when enable viewport is False. Please check the provided"
-                    "arguments to the environment class at initialization."
-                )
             # obtain the rgb data
             rgb_data = self._rgb_annotator.get_data()
             # convert to numpy array
@@ -380,35 +440,6 @@ class IsaacEnv(EnvBase):
                 f"Render mode '{mode}' is not supported. Please use: {self.metadata['render.modes']}."
             )
 
-    def _create_viewport_render_product(self):
-        """Create a render product of the viewport for rendering."""
-        # set camera view for "/OmniverseKit_Persp" camera
-        set_camera_view(eye=self.cfg.viewer.eye, target=self.cfg.viewer.lookat)
-
-        # check if flatcache is enabled
-        # this is needed to flush the flatcache data into Hydra manually when calling `env.render()`
-        # ref: https://docs.omniverse.nvidia.com/prod_extensions/prod_extensions/ext_physics.html
-        # if  self.sim.get_physics_context().use_flatcache:
-        #     from omni.physxflatcache import get_physx_flatcache_interface
-
-        #     # acquire flatcache interface
-        #     self._flatcache_iface = get_physx_flatcache_interface()
-
-        # check if viewport is enabled before creating render product
-        if self.enable_viewport:
-            import omni.replicator.core as rep
-
-            # create render product
-            self._render_product = rep.create.render_product(
-                "/OmniverseKit_Persp", tuple(self.cfg.viewer.resolution)
-            )
-            # create rgb annotator -- used to read data from the render product
-            self._rgb_annotator = rep.AnnotatorRegistry.get_annotator("rgb", device="cpu")
-            self._rgb_annotator.attach([self._render_product])
-        else:
-            carb.log_info("Viewport is disabled. Skipping creation of render product.")
-
-
 class _AgentSpecView(Dict[str, AgentSpec]):
     def __init__(self, env: IsaacEnv):
         super().__init__(env._agent_spec)
@@ -417,4 +448,3 @@ class _AgentSpecView(Dict[str, AgentSpec]):
     def __setitem__(self, k: str, v: AgentSpec) -> None:
         v._env = self.env
         return self.env._agent_spec.__setitem__(k, v)
-

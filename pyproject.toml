@@ -33,8 +33,9 @@ dependencies = [
     "scikit-image",
     "moviepy",
     "av",
-    "tensordict==0.5.0",
-    "torchrl==0.5.0",
+    "torchrl==0.6.0",
+    "tensordict==0.6.2",
+    "xxhash",
 ]
 
 [project.optional-dependencies]

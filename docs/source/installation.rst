@@ -164,14 +164,14 @@ Developer Guide: Python Environments
       - 0.3.1
       - 0.3.1
       - 0.5.0
-      - 0.6.0 (0.5.0 for tensordict==0.5.0)
+      - 0.6.0
     * - `tensordict <https://pypi.org/project/tensordict/>`_
       -
       - 0.1.1
       - 0.3.2
       - 0.3.2
       - 0.5.0
-      - 0.6.2 (0.5.0, now for make_funtional)
+      - 0.6.2
 
 Developer Guide: Test Run
 -------------------------

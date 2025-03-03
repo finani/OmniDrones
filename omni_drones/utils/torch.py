@@ -22,7 +22,6 @@
 
 
 import torch
-import functools
 from typing import Sequence, Union
 from contextlib import contextmanager
 
@@ -39,27 +38,6 @@ def torch_seed(seed: int=0):
         torch.cuda.set_rng_state_all(rng_state_cuda)
 
 
-def manual_batch(func):
-    @functools.wraps(func)
-    def wrapped(*args, **kwargs):
-        batch_shapes = set(arg.shape[:-1] for arg in args if isinstance(arg, torch.Tensor))
-        if not len(batch_shapes) == 1:
-            raise ValueError
-        batch_shape = batch_shapes.pop()
-        args = (
-            arg.reshape(-1, arg.shape[-1]) if isinstance(arg, torch.Tensor) else arg
-            for arg in args
-        )
-        kwargs = {
-            k: v.reshape(-1, v.shape[-1]) if isinstance(v, torch.Tensor) else v
-            for k, v in kwargs.items()
-        }
-        out = func(*args, **kwargs)
-        return out.unflatten(0, batch_shape)
-    return wrapped
-
-
-# @manual_batch
 def off_diag(a: torch.Tensor) -> torch.Tensor:
     assert a.shape[0] == a.shape[1]
     n = a.shape[0]
@@ -70,13 +48,11 @@ def off_diag(a: torch.Tensor) -> torch.Tensor:
     )
 
 
-# @manual_batch
 def cpos(p1: torch.Tensor, p2: torch.Tensor):
     assert p1.shape[1] == p2.shape[1]
     return p1.unsqueeze(1) - p2.unsqueeze(0)
 
 
-# @manual_batch
 def others(x: torch.Tensor) -> torch.Tensor:
     return off_diag(x.expand(x.shape[0], *x.shape))
 
@@ -182,6 +158,28 @@ def make_cells(
         cells = (cells.narrow(dim, 0, cells.size(dim)-1) + cells.narrow(dim, 1, cells.size(dim)-1)) / 2
     return cells
 
+import functools
+
+
+def manual_batch(func, broadcast=True):
+    @functools.wraps(func)
+    def wrapped(*args, **kwargs):
+        batch_shapes = [arg.shape[:-1] for arg in args]
+        if broadcast:
+            batch_shape = torch.broadcast_shapes(*batch_shapes)
+        else:
+            batch_shape = set(batch_shapes)
+            if len(batch_shape) != 1:
+                raise ValueError()
+            batch_shape = batch_shape.pop()
+        args = [
+            arg.expand(*batch_shape, arg.shape[-1]).reshape(-1, arg.shape[-1])
+            for arg in args
+        ]
+        ret = func(*args, **kwargs)
+        return ret.reshape(*batch_shape, *ret.shape[1:])
+    return wrapped
+
 
 @manual_batch
 def quat_rotate(q: torch.Tensor, v: torch.Tensor):
@@ -271,4 +269,3 @@ def symlog(x: torch.Tensor):
 
 def symexp(x: torch.Tensor):
     return torch.sign(x) * (torch.exp(torch.abs(x)) - 1)
-

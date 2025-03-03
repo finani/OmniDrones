@@ -415,3 +415,109 @@ class AttitudeController(ActionFunc):
             color=(0., 0., 0., .5)
         )
 
+
+class RateController(ActionFunc):
+
+    def __init__(
+        self,
+        env: "IsaacEnv",
+        asset_name: str,
+        inertia: Tuple[float, float, float], # TODO: calculate inertia
+        ang_rate_gain: Tuple[float, float, float],
+    ):
+        super().__init__(env)
+        self.asset: Multirotor = self.env.scene[asset_name]
+        self.rotor: Rotor = self.asset.actuators["rotor"]
+
+        self.action_dim = 4
+
+        rotor_pos_w = self.asset.data.body_pos_w[0, self.rotor.body_ids, :]
+        rotor_pos_b = quat_rotate_inverse(
+            self.asset.data.root_quat_w[0].unsqueeze(0),
+            rotor_pos_w - self.asset.data.root_pos_w[0].unsqueeze(0)
+        )
+
+        arm_lengths = rotor_pos_b.norm(dim=-1)
+        rotor_angles = torch.atan2(rotor_pos_b[..., 1], rotor_pos_b[..., 0])
+
+        def get_template(tensor):
+            return tensor.flatten(0, -2)[0]
+
+        rotor_direction = get_template(self.rotor.rotor_direction)
+        moment_to_force = get_template(self.rotor.km_normalized / self.rotor.kf_normalized)
+
+        print(f'[INFO]: arm_lengths: {arm_lengths.tolist()}')
+        print(f'[INFO]: rotor_angles: {rotor_angles.tolist()}')
+        print(f'[INFO]: rotor_direction: {rotor_direction.tolist()}')
+
+        with torch.device(self.device):
+            gravity_dir, gravity_mag = self.asset.env.sim.get_physics_context().get_gravity()
+            self.gravity = torch.as_tensor(gravity_dir) * gravity_mag
+
+            I = torch.as_tensor([*inertia, 1]).diag_embed()
+            A = torch.stack(
+                [
+                    torch.sin(rotor_angles) * arm_lengths,
+                    -torch.cos(rotor_angles) * arm_lengths,
+                    -rotor_direction * moment_to_force,
+                    torch.ones(self.rotor.shape[-1])
+                ]
+            )
+            self.mixer = A.T @ (A @ A.T).inverse() @ I
+            self.body_rate_gain = torch.as_tensor(ang_rate_gain) @ I[:3, :3].inverse()
+
+        self.mass = get_template(
+            self.asset.root_physx_view
+            .get_masses()
+            .sum(-1, keepdim=True)
+            .to(self.device)
+        )
+
+    @property
+    def action_shape(self):
+        return torch.Size([*self.asset.shape, self.action_dim])
+
+    def apply_action(self, action: torch.Tensor):
+        batch_shape = action.shape[:-1]
+        action = action.reshape(-1, 4)
+        target_throttle = self._compute(action)
+        self.rotor.throttle_target[:] = target_throttle.reshape(*batch_shape, self.rotor.num_rotors)
+
+    def _compute(self, action: torch.Tensor):
+        target_rate, target_thrust = action.split([3, 1], dim=-1)
+
+        ang_vel = self.asset.data.root_ang_vel_w
+        body_rate = self.asset.data.root_ang_vel_b
+
+        body_rate_err = target_rate - body_rate
+
+        ang_acc = (
+            + body_rate_err * self.body_rate_gain
+            + torch.cross(ang_vel, ang_vel, 1)
+        )
+        ang_acc_thrust = torch.cat([ang_acc, target_thrust], dim=-1)
+
+        target_thrusts = (self.mixer @ ang_acc_thrust.T).T
+        target_throttle = (target_thrusts / self.rotor.kf_normalized).sqrt()
+        return target_throttle
+
+    def debug_vis(self):
+        rotor_pos_w = self.asset.data.body_pos_w[..., self.rotor.body_ids, :].flatten(0, -2)
+        rotor_quat_w = self.asset.data.body_quat_w[..., self.rotor.body_ids, :].flatten(0, -2)
+
+        throttle = torch.zeros(self.rotor.shape + (3,), device=self.device)
+        throttle[..., 2] = self.rotor.throttle
+        throttle_w = quat_rotate(rotor_quat_w, throttle.flatten(0, -2))
+        self.env.debug_draw.vector(
+            rotor_pos_w,
+            throttle_w,
+        )
+
+        rest_throttle = torch.zeros(self.rotor.shape + (3,), device=self.device)
+        rest_throttle[..., 2] = 1.0 - self.rotor.throttle
+        rest_throttle_w = quat_rotate(rotor_quat_w, rest_throttle.flatten(0, -2))
+        self.env.debug_draw.vector(
+            rotor_pos_w + throttle_w,
+            rest_throttle_w,
+            color=(0., 0., 0., .5)
+        )

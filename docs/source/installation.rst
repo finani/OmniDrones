@@ -73,7 +73,7 @@ Clone Isaac Lab and install it.
 
     git clone git@github.com:isaac-sim/IsaacLab.git
     cd IsaacLab
-    git checkout v2.0.1
+    git checkout v2.0.2
     ./isaaclab.sh --install
 
 To verify the installation, run

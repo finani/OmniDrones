@@ -15,7 +15,6 @@ sim:
   dt: 0.016129032258064516
   enable_scene_query_support: true
   use_fabric: true
-  disable_contact_processing: true
   device: cuda:0
   physx:
     _target_: isaaclab.sim.PhysxCfg

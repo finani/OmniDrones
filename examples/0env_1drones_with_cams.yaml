@@ -2,8 +2,6 @@ headless: false
 num_envs: 4
 env_spacing: 2.5
 robot_name: firefly
-goal: [0, 0, 60, 1.5]
-# roll[deg], pitch[deg], yaw[deg or dps], z[force or height]
 
 viewer:
   resolution: [960, 720]
@@ -50,12 +48,12 @@ task:
   actions:
     - key: [agents, action]
       items:
-        AttitudeController:
+        LeePositionController:
           asset_name: drone
-          z_mode: height
-          yaw_mode: rate
+          xyz_mode: pos
+          yaw_mode: angle
           inertia: [0.0347563, 0.0458929, 0.0977]
           ang_rate_gain: [0.52, 0.52, 0.18]
           attitude_gain: [3, 3, 0.15]
           vel_gain: [4.7, 4.7, 4.7]
-          z_gain: 6
+          pos_gain: [6, 6, 6]

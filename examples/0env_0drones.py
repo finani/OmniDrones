@@ -7,8 +7,9 @@ from tqdm import trange
 from omni_drones import init_simulation_app
 from tensordict import TensorDict
 
+file_stem = Path(__file__).stem
 
-@hydra.main(config_path=os.path.dirname(__file__), config_name=Path(__file__).stem)
+@hydra.main(config_path=os.path.dirname(__file__), config_name=file_stem)
 def main(cfg):
     app = init_simulation_app(cfg)
 

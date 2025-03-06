@@ -18,7 +18,7 @@ def main(cfg):
     import isaacsim.core.api.objects as objects
     import isaacsim.core.utils.prims as prim_utils
     import omni_drones.utils.scene as scene_utils
-    from omni.isaac.core.simulation_context import SimulationContext
+    from isaacsim.core.api.simulation_context import SimulationContext
     from omni_drones.envs.transport.utils import TransportationGroup, TransportationCfg
     from omni_drones.robots.drone import MultirotorBase
 

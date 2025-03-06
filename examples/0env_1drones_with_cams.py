@@ -19,7 +19,6 @@ def main(cfg):
     # after the SimulationApp instance is created
     from omni_drones.envs.isaac_env import IsaacEnv
     from omni_drones.robots.assets import Multirotor, get_robot_cfg
-    from omni_drones.utils.torch import euler_to_quaternion
     from omni_drones.sensors.camera import Camera, PinholeCameraCfg
 
     from isaaclab.scene import InteractiveSceneCfg
@@ -37,17 +36,9 @@ def main(cfg):
             # let's get the drone entity
             self.drone: Multirotor = self.scene["drone"]
             self.default_init_state = self.drone.data.default_root_state.clone()
-            body_rate = self.drone.data.root_ang_vel_b
 
-            self.target_rate = torch.zeros(body_rate.size(), device=self.device)
-            self.target_rate[:, :3] = torch.as_tensor(cfg.goal[:3]) / 180.0 * torch.pi
-
-            # self.drone_mass = self.drone.root_physx_view.get_masses().sum(-1, keepdim=True).to(self.device)
-            # self.drone_mass = self.drone_mass.flatten(0, -2)[0]
-            # gravity_dir, gravity_mag = self.sim.get_physics_context().get_gravity()
-            # self.target_z = torch.ones(self.drone.shape, device=self.device) * self.drone_mass * gravity_mag
-            self.target_z = torch.zeros(self.drone.shape, device=self.device)
-            self.target_z[:] = cfg.goal[3]
+            self.target_pos = self.drone.data.root_pos_w - self.scene.env_origins
+            self.target_yaw = torch.zeros(self.drone.shape, device=self.device)
 
             self.resolve_specs()
 
@@ -82,10 +73,6 @@ def main(cfg):
             init_state = self.default_init_state[env_ids]
             init_state[:, :3] += self.scene.env_origins[env_ids]
 
-            init_rpy = torch.zeros(self.scene.env_origins.size(), device=self.device)
-            init_rpy[:, 2] = 45.0 / 180.0 * torch.pi
-            init_state[:, 3:7] = euler_to_quaternion(init_rpy)
-
             self.drone.write_root_state_to_sim(init_state, env_ids)
 
     env = MyEnv(cfg)
@@ -107,11 +94,11 @@ def main(cfg):
     camera_vis.initialize("/OmniverseKit_Persp")
 
     def policy(tensordict: TensorDict):
-        target_rate = env.target_rate
-        target_z = env.target_z.unsqueeze(1)
-        action = torch.cat([target_rate, target_z], dim=-1)
+        target_pos = env.target_pos
+        target_yaw = env.target_yaw.unsqueeze(1)
+        action = torch.cat([target_pos, target_yaw], dim=-1)
         tensordict["agents", "action"] = action
-        # print(f"{tensordict['agents', 'action']=}")
+        # print(f"{tensordict["agents", "action"]=}")
         return tensordict
 
     def rollout(env: IsaacEnv):
@@ -199,6 +186,7 @@ def main(cfg):
                        frame_uint8 = frame.astype('uint8')
                        out.write(frame_uint8)
                     out.release()
+
         return torch.stack(result)
 
     while app.is_running():

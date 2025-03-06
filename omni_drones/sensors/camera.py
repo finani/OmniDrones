@@ -29,7 +29,7 @@ import omni.replicator.core as rep
 
 import torch
 import warp as wp
-from omni.isaac.core.simulation_context import SimulationContext
+from isaacsim.core.api.simulation_context import SimulationContext
 from pxr import Gf, Sdf, UsdGeom
 from tensordict import TensorDict
 

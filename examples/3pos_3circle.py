@@ -37,17 +37,10 @@ def main(cfg):
             # let's get the drone entity
             self.drone: Multirotor = self.scene["drone"]
             self.default_init_state = self.drone.data.default_root_state.clone()
-            body_rate = self.drone.data.root_ang_vel_b
+            default_init_pos = self.drone.data.root_pos_w
 
-            self.target_rate = torch.zeros(body_rate.size(), device=self.device)
-            self.target_rate[:, :3] = torch.as_tensor(cfg.goal[:3]) / 180.0 * torch.pi
-
-            # self.drone_mass = self.drone.root_physx_view.get_masses().sum(-1, keepdim=True).to(self.device)
-            # self.drone_mass = self.drone_mass.flatten(0, -2)[0]
-            # gravity_dir, gravity_mag = self.sim.get_physics_context().get_gravity()
-            # self.target_z = torch.ones(self.drone.shape, device=self.device) * self.drone_mass * gravity_mag
-            self.target_z = torch.zeros(self.drone.shape, device=self.device)
-            self.target_z[:] = cfg.goal[3]
+            self.target_pos = torch.zeros(default_init_pos.size(), device=self.device)
+            self.target_yaw = torch.zeros(self.drone.shape, device=self.device)
 
             self.resolve_specs()
 
@@ -83,7 +76,10 @@ def main(cfg):
             init_state[:, :3] += self.scene.env_origins[env_ids]
 
             init_rpy = torch.zeros(self.scene.env_origins.size(), device=self.device)
-            init_rpy[:, 2] = 45.0 / 180.0 * torch.pi
+            init_rpy[0, 2] = 45.0 / 180.0 * torch.pi
+            init_rpy[1, 2] = 135.0 / 180.0 * torch.pi
+            init_rpy[3, 2] = 225.0 / 180.0 * torch.pi
+            init_rpy[2, 2] = 315.0 / 180.0 * torch.pi
             init_state[:, 3:7] = euler_to_quaternion(init_rpy)
 
             self.drone.write_root_state_to_sim(init_state, env_ids)
@@ -106,10 +102,30 @@ def main(cfg):
         camera_sensor.initialize(f"/World/envs/env_{i}/Robot/base_link/Camera")
     camera_vis.initialize("/OmniverseKit_Persp")
 
-    def policy(tensordict: TensorDict):
-        target_rate = env.target_rate
-        target_z = env.target_z.unsqueeze(1)
-        action = torch.cat([target_rate, target_z], dim=-1)
+    radius = (torch.ones(1, device=env.device) * 2.5).sqrt()
+    omega = torch.ones(1, device=env.device) * 1.
+    phase = torch.as_tensor([0., 1., 3., 2.], device=env.device) / 4.
+    def compute_ref(t):
+        _t = -torch.pi/4. + phase * 2*torch.pi + t * omega
+        pos = torch.stack([
+            torch.cos(_t) * radius,
+            torch.sin(_t) * radius,
+            torch.ones(env.num_envs, device=env.device) * 1.5
+        ], dim=-1)
+        pos -= env.scene.env_origins
+
+        vel_xy = torch.stack([
+            -torch.sin(_t) * radius * omega,
+            torch.cos(_t) * radius * omega,
+        ], dim=-1)
+        yaw = torch.atan2(vel_xy[:, 1], vel_xy[:, 0])
+        return pos, yaw
+
+    def policy(cur_t: float, tensordict: TensorDict):
+        ref_pos, ref_yaw = compute_ref(cur_t)
+        target_pos = ref_pos
+        target_yaw = ref_yaw.reshape(-1, 1)
+        action = torch.cat([target_pos, target_yaw], dim=-1)
         tensordict["agents", "action"] = action
         # print(f"{tensordict['agents', 'action']=}")
         return tensordict
@@ -120,8 +136,9 @@ def main(cfg):
 
         frames_sensor = []
         frames_vis = []
-        for _ in trange(env.max_episode_length):
-            data_ = policy(data_)
+        for i in trange(env.max_episode_length):
+            cur_t = (i % env.max_episode_length) * cfg.sim.dt
+            data_ = policy(cur_t, data_)
             data, data_ = env.step_and_maybe_reset(data_)
             result.append(data)
 

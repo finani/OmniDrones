@@ -3,12 +3,15 @@ import os
 from pathlib import Path
 import torch
 from tqdm import trange
+import dataclasses
+import cv2
 
 from omni_drones import init_simulation_app
 from tensordict import TensorDict
 
+file_stem = Path(__file__).stem
 
-@hydra.main(config_path=os.path.dirname(__file__), config_name=Path(__file__).stem)
+@hydra.main(config_path=os.path.dirname(__file__), config_name=file_stem)
 def main(cfg):
     app = init_simulation_app(cfg)
 
@@ -16,6 +19,7 @@ def main(cfg):
     # after the SimulationApp instance is created
     from omni_drones.envs.isaac_env import IsaacEnv
     from omni_drones.robots.assets import Multirotor, get_robot_cfg
+    from omni_drones.sensors.camera import Camera, PinholeCameraCfg
 
     from isaaclab.scene import InteractiveSceneCfg
     from isaaclab.assets import AssetBaseCfg
@@ -84,6 +88,22 @@ def main(cfg):
 
     env = MyEnv(cfg)
 
+    camera_cfg = PinholeCameraCfg(
+        sensor_tick=0,
+        resolution=(320, 240),
+        data_types=["rgb", "distance_to_camera"],
+    )
+    # cameras used as sensors
+    camera_sensor = Camera(camera_cfg)
+    camera_sensor.spawn(["/World/envs/env_0/Robot/base_link/Camera"])
+    # camera for visualization
+    # here we reuse the viewport camera, i.e., "/OmniverseKit_Persp"
+    camera_vis = Camera(dataclasses.replace(camera_cfg, resolution=(960, 720)))
+
+    for i in range(env.num_envs):
+        camera_sensor.initialize(f"/World/envs/env_{i}/Robot/base_link/Camera")
+    camera_vis.initialize("/OmniverseKit_Persp")
+
     def policy(tensordict: TensorDict):
         target_pitch = env.target_pitch.unsqueeze(1)
         target_roll = env.target_roll.unsqueeze(1)
@@ -97,14 +117,93 @@ def main(cfg):
     def rollout(env: IsaacEnv):
         data_ = env.reset()
         result = []
+
+        frames_sensor = []
+        frames_vis = []
         for _ in trange(env.max_episode_length):
             data_ = policy(data_)
             data, data_ = env.step_and_maybe_reset(data_)
             result.append(data)
+
+            frames_sensor.append(camera_sensor.get_images().cpu())
+            frames_vis.append(camera_vis.get_images().cpu())
+
+        # write videos
+        # from torchvision.io import write_video
+        fps = float(1. / cfg.sim.dt)
+
+        # drones' cam
+        for image_type, arrays in torch.stack(frames_sensor).items():
+            print(f"Writing {image_type} of shape {arrays.shape}.")
+            for drone_id, arrays_drone in enumerate(arrays.unbind(1)):
+                if image_type == "rgb":
+                    arrays_drone = arrays_drone.permute(0, 2, 3, 1)[..., :3]
+                    # write_video(f"demo_rgb_{drone_id}.mp4", arrays_drone, fps=fps)
+                    frames_numpy = arrays_drone.numpy()
+
+                    output_video_filename = f"{file_stem}_rgb_{drone_id}.mp4"
+                    frame_height, frame_width, _ = frames_numpy[0].shape
+
+                    fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+                    out = cv2.VideoWriter(output_video_filename, fourcc, fps, (frame_width, frame_height))
+                    for frame in frames_numpy:
+                        frame_bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+                        out.write(frame_bgr)
+                    out.release()
+                elif image_type == "distance_to_camera":
+                    arrays_drone = -torch.nan_to_num(arrays_drone, 0).permute(0, 2, 3, 1)
+                    arrays_drone = arrays_drone.expand(*arrays_drone.shape[:-1], 3)
+                    # write_video(f"demo_depth_{drone_id}.mp4", arrays_drone, fps=fps)
+                    frames_numpy = arrays_drone.numpy()
+
+                    output_video_filename = f"{file_stem}_depth_{drone_id}.mp4"
+                    frame_height, frame_width, _ = frames_numpy[0].shape
+
+                    fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+                    out = cv2.VideoWriter(output_video_filename, fourcc, fps, (frame_width, frame_height))
+                    for frame in frames_numpy:
+                        frame_uint8 = frame.astype('uint8')
+                        out.write(frame_uint8)
+                    out.release()
+
+        # global cam
+        for image_type, arrays in torch.stack(frames_vis).items():
+            print(f"Writing {image_type} of shape {arrays.shape}.")
+            for _, arrays_drone in enumerate(arrays.unbind(1)):
+                if image_type == "rgb":
+                    arrays_drone = arrays_drone.permute(0, 2, 3, 1)[..., :3]
+                    # write_video("demo_rgb.mp4", arrays_drone, fps=fps)
+                    frames_numpy = arrays_drone.numpy()
+
+                    output_video_filename = f"{file_stem}_rgb.mp4"
+                    frame_height, frame_width, _ = frames_numpy[0].shape
+
+                    fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+                    out = cv2.VideoWriter(output_video_filename, fourcc, fps, (frame_width, frame_height))
+                    for frame in frames_numpy:
+                        frame_bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+                        out.write(frame_bgr)
+                    out.release()
+                elif image_type == "distance_to_camera":
+                    arrays_drone = -torch.nan_to_num(arrays_drone, 0).permute(0, 2, 3, 1)
+                    arrays_drone = arrays_drone.expand(*arrays_drone.shape[:-1], 3)
+                    # write_video("demo_depth.mp4", arrays_drone, fps=fps)
+                    frames_numpy = arrays_drone.numpy()
+
+                    output_video_filename = f"{file_stem}_depth.mp4"
+                    frame_height, frame_width, _ = frames_numpy[0].shape
+
+                    fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+                    out = cv2.VideoWriter(output_video_filename, fourcc, fps, (frame_width, frame_height))
+                    for frame in frames_numpy:
+                       frame_uint8 = frame.astype('uint8')
+                       out.write(frame_uint8)
+                    out.release()
         return torch.stack(result)
 
     while app.is_running():
         rollout(env)
+        break
     app.close()
 
 

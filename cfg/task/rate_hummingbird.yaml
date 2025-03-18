@@ -1,0 +1,17 @@
+_target_: omni_drones.envs.isaac_env.TaskCfg
+
+name:
+max_episode_length: 200
+robot_name: hummingbird
+goal: [] # 7.02396030045
+# roll[dps], pitch[dps], yaw[dps], z[force]
+# hummingbird_mass = 0.7160
+# gravity = 9.8100004196167
+
+actions:
+  - key: [agents, action]
+    items:
+        RateController:
+          asset_name: drone
+          inertia: [0.007, 0.007, 0.012]
+          ang_rate_gain: [0.1, 0.1, 0.025]

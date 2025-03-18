@@ -1,0 +1,19 @@
+_target_: omni_drones.envs.isaac_env.TaskCfg
+
+name:
+max_episode_length: 200
+robot_name: firefly
+goal: []
+
+actions:
+  - key: [agents, action]
+    items:
+      LeePositionController:
+        asset_name: drone
+        xyz_mode: pos
+        yaw_mode: angle
+        inertia: [0.0347563, 0.0458929, 0.0977]
+        ang_rate_gain: [0.52, 0.52, 0.18]
+        attitude_gain: [3, 3, 0.15]
+        vel_gain: [4.7, 4.7, 4.7]
+        pos_gain: [6, 6, 6]

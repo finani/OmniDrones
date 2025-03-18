@@ -1,0 +1,19 @@
+_target_: omni_drones.envs.isaac_env.TaskCfg
+
+name:
+max_episode_length: 200
+robot_name: hummingbird
+goal: []
+
+actions:
+  - key: [agents, action]
+    items:
+      LeePositionController:
+        asset_name: drone
+        xyz_mode: acc
+        yaw_mode: rate
+        inertia: [0.007, 0.007, 0.012]
+        ang_rate_gain: [0.1, 0.1, 0.025]
+        attitude_gain: [0.7, 0.7, 0.035]
+        vel_gain: [2.2, 2.2, 2.2]
+        pos_gain: [4, 4, 4]

@@ -1,0 +1,5 @@
+_target_: omni_drones.envs.isaac_env.EnvCfg
+
+headless: false
+num_envs: 4
+env_spacing: 2.5

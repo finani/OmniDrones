@@ -1,0 +1,20 @@
+_target_: omni_drones.envs.isaac_env.TaskCfg
+
+name:
+max_episode_length: 200
+robot_name: firefly
+goal: []
+# roll[deg], pitch[deg], yaw[deg or dps], z[force or height]
+# firefly_mass = 1.56779
+# gravity = 9.8100004196167
+
+actions:
+  - key: [agents, action]
+    items:
+      AttitudeController:
+        asset_name: drone
+        z_mode: force
+        yaw_mode: angle
+        inertia: [0.0347563, 0.0458929, 0.0977]
+        ang_rate_gain: [0.52, 0.52, 0.18]
+        attitude_gain: [3, 3, 0.15]

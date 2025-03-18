@@ -2,9 +2,10 @@ import hydra
 import os
 from pathlib import Path
 import torch
-from tqdm import trange
 import dataclasses
 import cv2
+from tqdm import trange
+from omegaconf import OmegaConf
 
 from omni_drones import init_simulation_app
 from tensordict import TensorDict
@@ -14,6 +15,7 @@ file_stem = Path(__file__).stem
 @hydra.main(config_path=os.path.dirname(__file__), config_name=file_stem)
 def main(cfg):
     app = init_simulation_app(cfg)
+    print(OmegaConf.to_yaml(cfg))
 
     # due to the design of Isaac Sim, these imports are only available
     # after the SimulationApp instance is created
@@ -39,11 +41,11 @@ def main(cfg):
             default_init_pos = self.drone.data.root_pos_w
 
             self.target_pos = torch.zeros(default_init_pos.size(), device=self.device)
-            self.target_pos[:, 0] = cfg.goal[0]
-            self.target_pos[:, 1] = cfg.goal[1]
-            self.target_pos[:, 2] = cfg.goal[2]
+            self.target_pos[:, 0] = cfg.task.goal[0]
+            self.target_pos[:, 1] = cfg.task.goal[1]
+            self.target_pos[:, 2] = cfg.task.goal[2]
             self.target_yaw = torch.zeros(self.drone.shape, device=self.device)
-            self.target_yaw[:] = cfg.goal[3] / 180.0 * torch.pi
+            self.target_yaw[:] = cfg.task.goal[3] / 180.0 * torch.pi
 
             self.resolve_specs()
 
@@ -66,11 +68,11 @@ def main(cfg):
                     spawn=sim_utils.DomeLightCfg(color=(0.13, 0.13, 0.13), intensity=1000.0),
                 )
 
-                drone = get_robot_cfg(cfg.robot_name).replace(
+                drone = get_robot_cfg(cfg.task.robot_name).replace(
                     prim_path="{ENV_REGEX_NS}/Robot",
                 )
 
-            return SceneCfg(num_envs=cfg.num_envs, env_spacing=cfg.env_spacing)
+            return SceneCfg(num_envs=cfg.env.num_envs, env_spacing=cfg.env.env_spacing)
 
         def _reset_idx(self, env_ids: torch.Tensor):
             # since we have multiple parallel environments

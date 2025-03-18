@@ -44,12 +44,11 @@ from omni_drones.utils.torchrl import AgentSpec
 from collections import OrderedDict
 
 from isaaclab.scene import InteractiveScene
-from isaaclab.sim import SimulationContext
+from isaaclab.sim import SimulationContext, SimulationCfg
 from isaaclab.utils.timer import Timer
 
-import isaaclab.sim as sim_utils
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple, Type, Union, Callable
+from typing import Any, Dict, List, Optional, Type, Union, Callable
 
 class DebugDraw:
     def __init__(self):
@@ -82,16 +81,30 @@ class DebugDraw:
         self._draw.draw_lines(point_list_0, point_list_1, colors, sizes)
 
 @dataclass
+class EnvCfg:
+    headless: bool = False
+    num_envs: int = 128
+    env_spacing: float = 2.5
+
+@dataclass
 class TaskCfg:
-    num_envs: int = 1
-    max_episode_length: int = 1000
+    name: str = ""
+    max_episode_length: int = 500
+    robot_name: str = ""
+    goal: List[float] = field(default_factory=list)
 
     observations: List[Dict[str, Dict]] = field(default_factory=list)
     actions: List[Dict[str, Dict]] = field(default_factory=list)
     rewards: Dict[str, Dict] = field(default_factory=dict)
     termination: Dict[str, Dict] = field(default_factory=dict)
     randomizations: Dict[str, Dict] = field(default_factory=dict)
+    options: Dict[str, Any] = field(default_factory=dict)
 
+@dataclass
+class ViewerCfg:
+    resolution: List[float] = field(default_factory=list)
+    eye: List[float] = field(default_factory=list)
+    lookat: List[float] = field(default_factory=list)
 
 class IsaacEnv(EnvBase):
 
@@ -103,29 +116,31 @@ class IsaacEnv(EnvBase):
     def __init__(self, cfg):
         super().__init__(
             device=cfg.sim.device,
-            batch_size=[cfg.num_envs],
+            batch_size=[cfg.env.num_envs],
             run_type_checks=False
         )
         self.cfg = cfg
+        self.env_cfg: EnvCfg = hydra.utils.instantiate(self.cfg.env)
         self.task_cfg: TaskCfg = hydra.utils.instantiate(self.cfg.task)
+        viewer_cfg: ViewerCfg = hydra.utils.instantiate(self.cfg.viewer)
 
         self.max_episode_length = self.task_cfg.max_episode_length
         self.substeps = 1
 
         if SimulationContext.instance() is None:
-            sim_cfg = hydra.utils.instantiate(self.cfg.sim)
+            sim_cfg: SimulationCfg = hydra.utils.instantiate(self.cfg.sim)
             self.sim = SimulationContext(sim_cfg)
         else:
             raise RuntimeError("Simulation context already exists. Cannot create a new one.")
 
         # set camera view for "/OmniverseKit_Persp" camera
-        self.sim.set_camera_view(eye=self.cfg.viewer.eye, target=self.cfg.viewer.lookat)
+        self.sim.set_camera_view(eye=viewer_cfg.eye, target=viewer_cfg.lookat)
         # create render product
         try:
             import omni.replicator.core as rep
             # create render product
             self._render_product = rep.create.render_product(
-                "/OmniverseKit_Persp", tuple(self.cfg.viewer.resolution)
+                "/OmniverseKit_Persp", tuple(viewer_cfg.resolution)
             )
             # create rgb annotator -- used to read data from the render product
             self._rgb_annotator = rep.AnnotatorRegistry.get_annotator("rgb", device="cpu")

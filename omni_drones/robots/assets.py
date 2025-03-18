@@ -62,9 +62,9 @@ FIREFLY_CFG = ArticulationCfg(
 )
 
 def get_robot_cfg(robot_name: str) -> ArticulationCfg:
-    if robot_name == "hummingbird":
+    if robot_name.lower() == "hummingbird":
         return HUMMINGBIRD_CFG
-    elif robot_name == "firefly":
+    elif robot_name.lower() == "firefly":
         return FIREFLY_CFG
     else:
         raise ValueError(f"Unknown robot name: {robot_name}")

@@ -4,9 +4,9 @@ from pathlib import Path
 import torch
 from tqdm import trange
 from omegaconf import OmegaConf
+from tensordict import TensorDict
 
 from omni_drones import init_simulation_app
-from tensordict import TensorDict
 
 file_stem = Path(__file__).stem
 
@@ -17,13 +17,13 @@ def main(cfg):
 
     # due to the design of Isaac Sim, these imports are only available
     # after the SimulationApp instance is created
-    from omni_drones.envs.isaac_env import IsaacEnv
-    from omni_drones.robots.assets import Multirotor, get_robot_cfg
-
+    import isaaclab.sim as sim_utils
     from isaaclab.scene import InteractiveSceneCfg
     from isaaclab.assets import AssetBaseCfg
     from isaaclab.terrains import TerrainImporterCfg
-    import isaaclab.sim as sim_utils
+
+    from omni_drones.envs.isaac_env import IsaacEnv
+    from omni_drones.robots.assets import Multirotor, get_robot_cfg
 
     class MyEnv(IsaacEnv):
         def __init__(self, cfg):

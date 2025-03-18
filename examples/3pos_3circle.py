@@ -6,9 +6,9 @@ import dataclasses
 import cv2
 from tqdm import trange
 from omegaconf import OmegaConf
+from tensordict import TensorDict
 
 from omni_drones import init_simulation_app
-from tensordict import TensorDict
 
 file_stem = Path(__file__).stem
 
@@ -19,15 +19,15 @@ def main(cfg):
 
     # due to the design of Isaac Sim, these imports are only available
     # after the SimulationApp instance is created
+    import isaaclab.sim as sim_utils
+    from isaaclab.scene import InteractiveSceneCfg
+    from isaaclab.assets import AssetBaseCfg
+    from isaaclab.terrains import TerrainImporterCfg
+
     from omni_drones.envs.isaac_env import IsaacEnv
     from omni_drones.robots.assets import Multirotor, get_robot_cfg
     from omni_drones.utils.torch import euler_to_quaternion
     from omni_drones.sensors.camera import Camera, PinholeCameraCfg
-
-    from isaaclab.scene import InteractiveSceneCfg
-    from isaaclab.assets import AssetBaseCfg
-    from isaaclab.terrains import TerrainImporterCfg
-    import isaaclab.sim as sim_utils
 
     class MyEnv(IsaacEnv):
         def __init__(self, cfg):
